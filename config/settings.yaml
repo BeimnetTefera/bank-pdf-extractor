@@ -1,0 +1,15 @@
+# Local application settings.
+
+# Where uploaded PDFs, the SQLite database and Excel exports are stored.
+# Leave empty (null) to use the default %LOCALAPPDATA%\BankPdfExtractor on Windows
+# (~/.local/share/BankPdfExtractor elsewhere), which is outside OneDrive so these
+# files are not synced. A relative path is resolved from the project folder.
+data_dir: null
+
+# Upload limits for the prototype. Real annual reports seen so far are up to ~57 MB.
+max_upload_mb: 100
+max_pages: 1000
+
+# Name recorded with each approve/reject/correct decision ("who reviewed this").
+# Leave empty to use the Windows user name; it can be changed in the app.
+default_reviewer: null

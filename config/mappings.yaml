@@ -1,0 +1,15 @@
+# Label aliases: the exact wording banks print for each metric in config/metrics.yaml.
+#
+# Add aliases only after reviewing real bank-report labels.
+# Do not add assumptions about components or summation without an agreed definition.
+#
+# Format (example only, not a reviewed alias):
+#
+#   mappings:
+#     - metric_id: total_assets_etb      # must match an id in metrics.yaml
+#       aliases:
+#         - "Total assets"
+#
+# An alias listed under two different metrics is allowed here; the mapper will flag
+# any label that matches more than one metric for human review instead of picking one.
+mappings: []

@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.env
+.env.*
+
+# Local app data: may contain sensitive financial documents and figures
+data/uploads/*
+data/exports/*
+data/app.db
+data/*.db
+!data/uploads/.gitkeep
+!data/exports/.gitkeep
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

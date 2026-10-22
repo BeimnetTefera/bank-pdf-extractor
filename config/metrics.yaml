@@ -1,0 +1,286 @@
+# Bank metrics to extract from annual-report PDFs.
+#
+# Source: the BANK table of the Shega data pipeline
+# (shega_data_databricks_pipeline/src/bronze/schema.py, BANK_COLUMNS).
+# `definition` is copied from the pipeline's column descriptions. It describes how the
+# Shega dataset uses the column; it is NOT yet a confirmed extraction rule (see
+# docs/decisions.md, open business questions).
+#
+# Fields
+#   id             stable snake_case ID used inside this app
+#   shega_column   exact column name in the Shega dataset (case-sensitive)
+#   display_name   label shown in the UI
+#   definition     what the metric means
+#   expected_unit  one of: ETB | count | fraction | ratio
+#                    ETB      amount in Ethiopian Birr (full birr, not thousands)
+#                    count    whole number of things (branches, employees, ...)
+#                    fraction percentage stored as a decimal: 0.14 means 14%
+#                    ratio    one quantity per another (e.g. ATMs per branch)
+#   active         true = selectable in the UI
+#   notes          optional caveats
+#
+# Derived metrics (ratios calculated from other columns) are inactive: the app must not
+# calculate them until a calculation policy is agreed.
+
+metrics:
+  # --- Balance sheet -------------------------------------------------------
+  - id: total_assets_etb
+    shega_column: total_assets_etb
+    display_name: Total assets
+    definition: "Sum of all assets owned or controlled by the institution valued in Ethiopian Birr (ETB). Encompasses cash, loans, investments, fixed assets, and other holdings."
+    expected_unit: ETB
+    active: true
+
+  - id: total_assets_previous_year_etb
+    shega_column: total_assets_previous_year_etb
+    display_name: Total assets (previous year)
+    definition: "Total assets at the close of the preceding fiscal year, in ETB, for year-on-year growth."
+    expected_unit: ETB
+    active: true
+    notes: "Usually the comparative column of the balance sheet. Empty in the Shega source as of the 2026-05-28 load."
+
+  - id: total_liabilities_etb
+    shega_column: total_liabilities_etb
+    display_name: Total liabilities
+    definition: "Total obligations and debts owed by the institution to depositors, creditors, and other parties, denominated in Ethiopian Birr (ETB)."
+    expected_unit: ETB
+    active: true
+
+  - id: total_equity_etb
+    shega_column: total_equity_etb
+    display_name: Total equity
+    definition: "Shareholders' equity: the residual interest in the institution's assets after deducting all liabilities (paid-up capital + reserves + retained earnings), in ETB."
+    expected_unit: ETB
+    active: true
+
+  - id: paid_up_capital_etb
+    shega_column: paid_up_capital_etb
+    display_name: Paid-up capital
+    definition: "Portion of issued share capital that has been fully paid by shareholders, as registered with the National Bank of Ethiopia, in ETB."
+    expected_unit: ETB
+    active: true
+
+  - id: total_deposits_etb
+    shega_column: total_deposits_etb
+    display_name: Total deposits
+    definition: "Total customer deposits held by the bank (demand, savings, and time deposits combined) at the end of the fiscal year, in Ethiopian Birr (ETB)."
+    expected_unit: ETB
+    active: true
+    notes: "Open question: whether interbank deposits are included. The definition says customer deposits only; confirm before treating a combined figure as this metric."
+
+  - id: loans_and_advances_etb
+    shega_column: loans_and_advances_etb
+    display_name: Loans and advances (net)
+    definition: "Net outstanding balance of loans and advances extended to borrowers (gross loans less provisions for loan losses), in Ethiopian Birr (ETB)."
+    expected_unit: ETB
+    active: true
+
+  - id: non_performing_loans_etb
+    shega_column: NonPerformingLoanEtb
+    display_name: Non-performing loans
+    definition: "Gross carrying value of loans classified as non-performing (overdue beyond 90 days or otherwise unlikely to be recovered), in Ethiopian Birr (ETB)."
+    expected_unit: ETB
+    active: true
+
+  - id: foreign_assets_etb
+    shega_column: ForeignAssetsEtb
+    display_name: Foreign assets
+    definition: "Value of assets held in foreign currencies or placed outside Ethiopia (e.g. nostro accounts, foreign investments), expressed in ETB equivalent."
+    expected_unit: ETB
+    active: true
+
+  - id: nbe_bills_etb
+    shega_column: NbeBillsEtb
+    display_name: NBE bills
+    definition: "National Bank of Ethiopia (NBE) bills and mandatory government treasury instruments held by the bank under the NBE investment directive, in ETB."
+    expected_unit: ETB
+    active: true
+
+  - id: average_total_assets_etb
+    shega_column: average_total_assets_etb
+    display_name: Average total assets
+    definition: "Average of total assets across the fiscal year, the denominator of Return on Assets, in ETB."
+    expected_unit: ETB
+    active: false
+    notes: "Derived. Averaging method (opening/closing vs monthly) not agreed. Empty in the Shega source as of the 2026-05-28 load."
+
+  # --- Income statement ----------------------------------------------------
+  - id: total_revenue_etb
+    shega_column: total_revenue_etb
+    display_name: Total revenue
+    definition: "Total income earned from all sources (interest income, fees, commissions, and other operating income) during the fiscal year, in Ethiopian Birr (ETB)."
+    expected_unit: ETB
+    active: true
+
+  - id: total_expense_etb
+    shega_column: total_expense_etb
+    display_name: Total expense
+    definition: "Total operating and non-operating expenses incurred during the fiscal year, in Ethiopian Birr (ETB)."
+    expected_unit: ETB
+    active: true
+
+  - id: profit_before_tax_etb
+    shega_column: profit_before_tax_etb
+    display_name: Profit before tax
+    definition: "Earnings Before Tax (EBT): net operating profit after all expenses but before deducting corporate income tax, in Ethiopian Birr (ETB)."
+    expected_unit: ETB
+    active: true
+
+  - id: profit_tax_etb
+    shega_column: profit_tax_etb
+    display_name: Profit tax
+    definition: "Corporate income tax charged on the institution's taxable profit for the fiscal year, in ETB."
+    expected_unit: ETB
+    active: true
+
+  - id: profit_after_tax_etb
+    shega_column: profit_after_tax_etb
+    display_name: Profit after tax
+    definition: "Net profit remaining after deducting corporate income tax from profit before tax. Represents the bank's bottom-line earnings attributable to shareholders, in ETB."
+    expected_unit: ETB
+    active: true
+
+  # --- Returns (as reported) -----------------------------------------------
+  - id: roe_percent
+    shega_column: roe_percent
+    display_name: Return on equity (ROE)
+    definition: "Return on Equity: net income relative to shareholders' equity. Stored as a decimal fraction, not a 0-100 percentage: 0.1400 means 14%."
+    expected_unit: fraction
+    active: true
+    notes: "Extract only as printed in the report; do not calculate."
+
+  - id: roa_percent
+    shega_column: roa_percent
+    display_name: Return on assets (ROA)
+    definition: "Return on Assets: net income relative to total assets. Stored as a decimal fraction, not a 0-100 percentage: 0.0400 means 4%."
+    expected_unit: fraction
+    active: true
+    notes: "Extract only as printed in the report; do not calculate."
+
+  - id: eps_etb
+    shega_column: eps_etb
+    display_name: Earnings per share (EPS)
+    definition: "Earnings Per Share: net profit attributable to each ordinary share outstanding, in Ethiopian Birr (ETB)."
+    expected_unit: ETB
+    active: true
+
+  # --- Operations and outreach ---------------------------------------------
+  - id: branches
+    shega_column: branches
+    display_name: Branches
+    definition: "Total number of physical branch offices operated by the bank during the fiscal year, as reported to the National Bank of Ethiopia."
+    expected_unit: count
+    active: true
+
+  - id: atms
+    shega_column: atms
+    display_name: ATMs
+    definition: "Total number of Automated Teller Machines (ATMs) deployed and operational during the fiscal year."
+    expected_unit: count
+    active: true
+
+  - id: pos_machines
+    shega_column: pos_machines
+    display_name: POS machines
+    definition: "Total number of Point-of-Sale (POS) card payment terminals deployed at merchant locations during the fiscal year."
+    expected_unit: count
+    active: true
+
+  - id: agents
+    shega_column: agents
+    display_name: Banking agents
+    definition: "Total number of banking agents (outsourced third-party service delivery points authorized by NBE) active during the fiscal year."
+    expected_unit: count
+    active: true
+
+  - id: employees
+    shega_column: Employees
+    display_name: Employees
+    definition: "Total number of full-time equivalent employees on the bank's payroll at the end of the fiscal year."
+    expected_unit: count
+    active: true
+
+  - id: shareholders
+    shega_column: Shareholders
+    display_name: Shareholders
+    definition: "Total number of registered shareholders holding equity in the bank."
+    expected_unit: count
+    active: true
+
+  - id: deposit_account_holders
+    shega_column: deposit_account_holders
+    display_name: Deposit account holders
+    definition: "Total number of individual and corporate customers holding at least one active deposit account at the bank."
+    expected_unit: count
+    active: true
+
+  - id: mobile_banking_users
+    shega_column: mobile_banking_users
+    display_name: Mobile banking users
+    definition: "Number of customers registered for and actively using the bank's mobile banking platform during the reporting period."
+    expected_unit: count
+    active: true
+
+  - id: cardholders
+    shega_column: cardholders
+    display_name: Cardholders
+    definition: "Total number of customers holding active payment cards (debit, credit, or prepaid) issued by the bank."
+    expected_unit: count
+    active: true
+
+  # --- Derived ratios (inactive until a calculation policy is agreed) ------
+  - id: atm_to_branch_ratio
+    shega_column: atm_to_branch_ratio
+    display_name: ATMs per branch
+    definition: "Number of ATMs per branch; indicates the density of automated self-service infrastructure relative to the physical branch network."
+    expected_unit: ratio
+    active: false
+    notes: "Derived from atms / branches."
+
+  - id: agents_to_branch_ratio
+    shega_column: agents_to_branch_ratio
+    display_name: Agents per branch
+    definition: "Number of banking agents per branch; measures the reach of outsourced delivery channels relative to the bank's physical branch footprint."
+    expected_unit: ratio
+    active: false
+    notes: "Derived from agents / branches."
+
+  - id: deposit_per_branch_etb
+    shega_column: deposit_per_branch_etb
+    display_name: Deposits per branch
+    definition: "Total customer deposits divided by the number of branches; measures deposit mobilisation efficiency per physical location, in ETB."
+    expected_unit: ETB
+    active: false
+    notes: "Derived from total_deposits_etb / branches."
+
+  - id: deposit_per_account_holder_etb
+    shega_column: deposit_per_account_holder_etb
+    display_name: Deposits per account holder
+    definition: "Average deposit balance per account holder (total deposits / deposit account holders); a proxy for customer savings depth, in ETB."
+    expected_unit: ETB
+    active: false
+    notes: "Derived from total_deposits_etb / deposit_account_holders."
+
+  - id: customers_per_branch_ratio
+    shega_column: CustomersPerBranchRatio
+    display_name: Customers per branch
+    definition: "Total customers divided by the number of branches; measures average customer service load per physical branch location."
+    expected_unit: ratio
+    active: false
+    notes: "Derived. Which customer count is the numerator is not agreed."
+
+  - id: digital_penetration_excl_cards_pct
+    shega_column: digital_penetration_excl_cards_pct
+    display_name: Digital penetration (excl. cards)
+    definition: "Share of customers using digital banking channels (mobile, internet or agent banking), excluding payment card holders. Stored as a decimal fraction: 0.274 means 27.4%."
+    expected_unit: fraction
+    active: false
+    notes: "Likely derived. Activate if reports print this figure directly."
+
+  - id: digital_penetration_incl_cards_pct
+    shega_column: digital_penetration_incl_cards_pct
+    display_name: Digital penetration (incl. cards)
+    definition: "Share of customers using any digital banking channel including payment cards. Stored as a decimal fraction: 0.560 means 56%. Can exceed 1.0 when a customer is counted in more than one channel."
+    expected_unit: fraction
+    active: false
+    notes: "Likely derived. Activate if reports print this figure directly."

@@ -1,0 +1,25 @@
+[browser]
+# No telemetry (docs/security-and-privacy.md): Streamlit sends usage stats unless disabled.
+gatherUsageStats = false
+
+[server]
+# Matches max_upload_mb in config/settings.yaml; the app also enforces that limit.
+maxUploadSize = 100
+
+[theme]
+base = "light"
+primaryColor = "#2563EB"
+backgroundColor = "#F8FAFC"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#0F172A"
+borderColor = "#E2E8F0"
+baseRadius = "medium"
+showWidgetBorder = true
+font = "sans-serif"
+
+[theme.sidebar]
+backgroundColor = "#0F172A"
+secondaryBackgroundColor = "#1E293B"
+textColor = "#E2E8F0"
+primaryColor = "#3B82F6"
+borderColor = "#1E293B"

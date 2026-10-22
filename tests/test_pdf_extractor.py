@@ -1,12 +1,40 @@
 import pymupdf
 import pytest
 
-from src.pdf_extractor import EXTRACTION_METHOD, extract_candidates, is_value_token
+from src.pdf_extractor import (
+    NARRATIVE_METHOD,
+    TABLE_METHOD,
+    extract_candidates,
+    is_narrative_number,
+    is_prose,
+    is_value_token,
+    strip_sentence_punctuation,
+)
 from tests.conftest import make_pdf
 
 
 def values_by_label(result, label):
-    return [c.raw_value_text for c in result.candidates if c.raw_label == label]
+    return [c.raw_value_text for c in table_candidates(result) if c.raw_label == label]
+
+
+def table_candidates(result):
+    return [c for c in result.candidates if c.extraction_method == TABLE_METHOD]
+
+
+def narrative_candidates(result):
+    return [c for c in result.candidates if c.extraction_method == NARRATIVE_METHOD]
+
+
+def prose_pdf(*paragraphs: str) -> bytes:
+    """One page with each paragraph in its own text box (one PyMuPDF block each)."""
+    doc = pymupdf.open()
+    page = doc.new_page()
+    for i, text in enumerate(paragraphs):
+        top = 72 + i * 150
+        page.insert_textbox(pymupdf.Rect(72, top, 520, top + 140), text, fontsize=10)
+    data = doc.tobytes()
+    doc.close()
+    return data
 
 
 def test_table_row_becomes_one_candidate_per_value():
@@ -16,7 +44,7 @@ def test_table_row_becomes_one_candidate_per_value():
     assert (second.raw_value_text, second.column_index) == ("286,226,976", 1)
     assert first.row_value_count == 2
     assert first.row_text == "Total assets 381,497,212 286,226,976"
-    assert first.extraction_method == EXTRACTION_METHOD
+    assert first.extraction_method == TABLE_METHOD
 
 
 def test_raw_value_text_is_kept_exactly_as_printed():
@@ -48,7 +76,7 @@ def test_numbers_only_row_is_kept_with_empty_label():
 
 def test_text_only_rows_produce_no_candidates_but_appear_in_context():
     pdf = make_pdf([[("ASSETS", []), ("Birr'000", []), ("Cash and cash equivalents", ["76,416,523"])]])
-    (candidate,) = extract_candidates(pdf).candidates
+    (candidate,) = table_candidates(extract_candidates(pdf))
     assert candidate.context_text == "ASSETS\nBirr'000\nCash and cash equivalents 76,416,523"
 
 
@@ -114,3 +142,75 @@ def test_results_are_described_as_unverified(simple_pdf):
 )
 def test_is_value_token(token, expected):
     assert is_value_token(token) is expected
+
+
+# --- narrative (sentence) candidates -------------------------------------------
+
+def test_number_before_label_in_a_sentence_is_captured():
+    result = extract_candidates(prose_pdf(
+        "The Bank now operates an extensive network comprising 981 branches, 1,761 ATMs and 80 virtual centers."
+    ))
+    found = {c.raw_value_text: c for c in narrative_candidates(result)}
+    assert list(found) == ["981", "1,761", "80"]
+    assert found["981"].text_after.startswith("branches, 1,761 ATMs")
+    assert found["981"].text_before.endswith("extensive network comprising")
+    assert found["981"].raw_label == ""
+
+
+def test_label_before_number_in_a_sentence_is_captured():
+    result = extract_candidates(prose_pdf("Return on equity has jumped to 29% from 25.3% a year ago."))
+    found = {c.raw_value_text: c for c in narrative_candidates(result)}
+    assert list(found) == ["29%", "25.3%"]  # sentence punctuation is not part of the value
+    assert found["29%"].text_before == "Return on equity has jumped to"
+
+
+def test_bare_years_are_not_captured_in_prose():
+    result = extract_candidates(prose_pdf("Total assets increased to Birr 381.50 billion as at June 2026, up from 2025."))
+    assert [c.raw_value_text for c in narrative_candidates(result)] == ["381.50"]
+
+
+def test_narrative_window_stays_inside_its_text_block():
+    # Two separate blocks (e.g. two columns): words from one must not leak into the other.
+    result = extract_candidates(prose_pdf(
+        "The left column talks about 981 branches across the country.",
+        "The right column reports 10,627 permanent employees at year end.",
+    ))
+    found = {c.raw_value_text: c for c in narrative_candidates(result)}
+    assert "employees" not in found["981"].text_after
+    assert "branches" not in found["10,627"].text_before
+    assert found["981"].row_index != found["10,627"].row_index
+
+
+def test_numeric_table_blocks_produce_no_narrative_candidates():
+    result = extract_candidates(make_pdf([[("", ["381,497,212", "286,226,976", "16"])]]))
+    assert narrative_candidates(result) == []
+
+
+def test_narrative_candidate_keeps_page_and_position():
+    pdf_bytes = prose_pdf("The Bank has 981 branches nationwide.")
+    (candidate,) = narrative_candidates(extract_candidates(pdf_bytes))
+    assert candidate.page_index == 0
+    x0, y0, x1, y1 = candidate.bbox
+    assert x1 > x0 and y1 > y0
+
+
+@pytest.mark.parametrize(
+    "token,expected",
+    [("29%,", "29%"), ("branches.", "branches"), ("(29%", "29%"), ("25.3%)", "25.3%"), ("(18,576)", "(18,576)"), ("381.50", "381.50")],
+)
+def test_strip_sentence_punctuation(token, expected):
+    assert strip_sentence_punctuation(token) == expected
+
+
+@pytest.mark.parametrize(
+    "token,expected",
+    [("981", True), ("1,761", True), ("29%", True), ("381.50", True), ("2026", False), ("1999", False), ("-", False), ("FY", False)],
+)
+def test_is_narrative_number(token, expected):
+    assert is_narrative_number(token) is expected
+
+
+def test_is_prose_threshold():
+    assert is_prose(["The", "Bank", "has", "981", "branches"]) is True
+    assert is_prose(["Total", "assets", "381,497,212", "286,226,976"]) is False  # 50% words
+    assert is_prose([]) is False

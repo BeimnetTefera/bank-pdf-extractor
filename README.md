@@ -80,6 +80,8 @@ python -m scripts.inspect_pdf "/c/path/to/report.pdf" --find "total assets"
 
 Prints page count, text availability and raw label/value rows with their PDF page. See `docs/manual-testing.md` for the full procedure and recorded observations. All output is unverified.
 
+The same check is available in the app (`streamlit run app.py`, tab **Extraction preview**): upload a PDF, search the figures, and click a row to see the value boxed in red on its PDF page. The preview reads the PDF in memory and saves nothing.
+
 ## Project documents
 
 Read these in order:

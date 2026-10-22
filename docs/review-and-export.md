@@ -2,7 +2,7 @@
 
 ## 1. Review UI concept
 
-The interface should roughly follow the approved mockup:
+The interface should roughly follow the approved mockup (`docs/ui-mockup.png`). Its figures are example data only. Where it differs from confirmed decisions, the decisions win: one PDF at a time (D-003), local save only (D-006), reviewer name instead of login (D-016).
 - Sidebar/navigation with Home, Extract & Review, Bank Reports, Templates/Metric Configuration, and Settings as appropriate.
 - Bank and reporting period selector.
 - PDF viewer with page navigation.

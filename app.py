@@ -1,15 +1,14 @@
 """Streamlit entry point. Run with: streamlit run app.py
 
-Phase 1 placeholder: shows that configuration loads. The review workflow is built in Phase 5.
+Only navigation lives here; each screen is in src/ui/.
 """
 
 import streamlit as st
 
 from src.config_loader import ConfigError, load_config
+from src.ui import extract_review, pages
 
-st.set_page_config(page_title="Bank PDF Extractor", layout="wide")
-st.title("Bank PDF Extractor")
-st.caption("Local prototype. Extracted figures are unverified candidates until reviewed.")
+st.set_page_config(page_title="Bank PDF Extractor", page_icon=":material/account_balance:", layout="wide")
 
 try:
     config = load_config()
@@ -18,29 +17,43 @@ except ConfigError as exc:
     st.code(str(exc), language="text")
     st.stop()
 
-settings = config.settings
-st.info("Extraction and review are not built yet (Phase 1 skeleton).")
 
-col_metrics, col_settings = st.columns([2, 1])
-with col_metrics:
-    st.subheader(f"Configured metrics ({len(config.active_metrics())} active of {len(config.metrics)})")
-    st.dataframe(
-        [
-            {
-                "Metric": m.display_name,
-                "ID": m.id,
-                "Unit": m.expected_unit,
-                "Active": m.active,
-                "Notes": m.notes or "",
-            }
-            for m in config.metrics
-        ],
-        hide_index=True,
-        width="stretch",
-    )
-with col_settings:
-    st.subheader("Settings")
-    st.write(f"**Data folder:** `{settings.data_dir}`")
-    st.write(f"**Upload limit:** {settings.max_upload_mb} MB, {settings.max_pages} pages")
-    st.write(f"**Reviewer:** {settings.default_reviewer}")
-    st.write(f"**Label aliases configured:** {len(config.mappings)}")
+def home_page() -> None:
+    pages.home()
+
+
+def extract_review_page() -> None:
+    extract_review.render(config)
+
+
+def bank_reports_page() -> None:
+    pages.bank_reports()
+
+
+def templates_page() -> None:
+    pages.templates(config)
+
+
+def settings_page() -> None:
+    pages.settings(config)
+
+
+app_pages = [
+    st.Page(home_page, title="Home", icon=":material/home:", url_path="home"),
+    st.Page(extract_review_page, title="Extract & Review", icon=":material/fact_check:", url_path="extract_review", default=True),
+    st.Page(bank_reports_page, title="Bank Reports", icon=":material/account_balance:", url_path="bank_reports"),
+    st.Page(templates_page, title="Templates", icon=":material/description:", url_path="templates"),
+    st.Page(settings_page, title="Settings", icon=":material/settings:", url_path="settings"),
+]
+# Hidden built-in menu so the app title can sit above our own menu, as in the mockup.
+navigation = st.navigation(app_pages, position="hidden")
+
+with st.sidebar:
+    st.markdown("### :material/account_balance: Bank PDF Extractor")
+    for page in app_pages:
+        st.page_link(page)
+    st.divider()
+    st.caption(f"Reviewer: {config.settings.default_reviewer}")
+    st.caption("Local prototype · documents stay on this computer")
+
+navigation.run()

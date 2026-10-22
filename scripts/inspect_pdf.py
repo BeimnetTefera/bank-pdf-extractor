@@ -20,7 +20,7 @@ from pathlib import Path
 
 from src.config_loader import ConfigError, load_config
 from src.document_manager import DocumentError, compute_sha256, validate_pdf
-from src.pdf_extractor import ExtractionResult, RawCandidate, extract_candidates
+from src.pdf_extractor import NARRATIVE_METHOD, ExtractionResult, RawCandidate, extract_candidates
 
 CSV_COLUMNS = [
     "pdf_page",
@@ -30,6 +30,8 @@ CSV_COLUMNS = [
     "row_value_count",
     "raw_label",
     "raw_value_text",
+    "text_before",
+    "text_after",
     "row_text",
     "context_text",
     "extraction_method",
@@ -39,7 +41,10 @@ CSV_COLUMNS = [
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("pdf", type=Path, help="path to a local PDF")
-    parser.add_argument("--find", help="show rows whose label contains this text (case-insensitive)")
+    parser.add_argument(
+        "--find",
+        help="show table rows whose label, or narrative numbers whose nearby words, contain this text",
+    )
     parser.add_argument("--page", type=int, help="show all rows on this PDF page (1-based)")
     parser.add_argument("--csv", action="store_true", help="write all candidates to a CSV file")
     args = parser.parse_args(argv)
@@ -67,8 +72,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.page is not None:
         print_rows(f"PDF page {args.page}", [c for c in result.candidates if c.page_index == args.page - 1])
     if args.find:
-        needle = args.find.lower()
-        print_rows(f"labels containing '{args.find}'", [c for c in result.candidates if needle in c.raw_label.lower()])
+        print_rows(f"matches for '{args.find}'", [c for c in result.candidates if matches(c, args.find)])
     if args.csv:
         out = settings.exports_dir / f"phase2_candidates_{sha256[:12]}.csv"
         write_csv(out, result.candidates)
@@ -95,17 +99,31 @@ def print_summary(filename: str, size: int, sha256: str, result: ExtractionResul
             print(f"  PDF page {page_index + 1:>4}: {count} values")
 
 
+def matches(candidate: RawCandidate, text: str) -> bool:
+    needle = text.lower()
+    if candidate.extraction_method == NARRATIVE_METHOD:
+        return needle in candidate.text_before.lower() or needle in candidate.text_after.lower()
+    return needle in candidate.raw_label.lower()
+
+
 def print_rows(title: str, candidates: list[RawCandidate]) -> None:
     print(f"\n--- {title}: {len(candidates)} values (UNVERIFIED) ---")
+    table = [c for c in candidates if c.extraction_method != NARRATIVE_METHOD]
+    narrative = [c for c in candidates if c.extraction_method == NARRATIVE_METHOD]
+
     seen: set[tuple[int, int]] = set()
-    for c in candidates:
+    for c in table:
         key = (c.page_index, c.row_index)
         if key in seen:
             continue
         seen.add(key)
-        values = " | ".join(x.raw_value_text for x in candidates if (x.page_index, x.row_index) == key)
+        values = " | ".join(x.raw_value_text for x in table if (x.page_index, x.row_index) == key)
         label = c.raw_label or "(no label)"
-        print(f"  p{c.page_index + 1:<4} {label[:70]:<70}  {values}")
+        print(f"  p{c.page_index + 1:<4} table      {label[:62]:<62}  {values}")
+    for c in narrative:
+        before = c.text_before[-45:]
+        after = c.text_after[:45]
+        print(f"  p{c.page_index + 1:<4} narrative  ...{before} [{c.raw_value_text}] {after}...")
 
 
 def write_csv(path: Path, candidates: list[RawCandidate]) -> None:
@@ -124,6 +142,8 @@ def write_csv(path: Path, candidates: list[RawCandidate]) -> None:
                     "row_value_count": c.row_value_count,
                     "raw_label": c.raw_label,
                     "raw_value_text": c.raw_value_text,
+                    "text_before": c.text_before,
+                    "text_after": c.text_after,
                     "row_text": c.row_text,
                     "context_text": c.context_text,
                     "extraction_method": c.extraction_method,

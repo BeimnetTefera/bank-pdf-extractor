@@ -72,6 +72,14 @@ Uploaded PDFs, the SQLite database and Excel exports are stored in `%LOCALAPPDAT
 
 If a config file is invalid, the app and the tests list every problem with the file, entry and fix needed.
 
+## Inspecting a PDF (Phase 2)
+
+```bash
+python -m scripts.inspect_pdf "/c/path/to/report.pdf" --find "total assets"
+```
+
+Prints page count, text availability and raw label/value rows with their PDF page. See `docs/manual-testing.md` for the full procedure and recorded observations. All output is unverified.
+
 ## Project documents
 
 Read these in order:

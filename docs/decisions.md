@@ -24,6 +24,8 @@ Use this file to record decisions as they are made. Do not silently convert an a
 | D-016 | Reviewer label is a free-text name stored with every review decision (default: Windows user name, editable in the app). No login | Proposed | Answers "who approved this figure" for the audit trail without building authentication |
 | D-017 | Reporting period uses the Shega `fiscal_year` format `YYYY/YY` (Ethiopian fiscal year, July–June), e.g. `2025/26` | Proposed | Matches the existing dataset key |
 | D-018 | Config is validated by hand-written checks into dataclasses; Pydantic not added | Confirmed 2026-10-22 | Config is small and already fully validated and tested; avoids a dependency |
+| D-019 | Phase 2 extraction uses PyMuPDF only (word positions grouped into rows); pdfplumber is not used yet | Confirmed 2026-10-22 | One extraction path until a real report shows PyMuPDF failing; BOA balance sheet rows were rebuilt correctly |
+| D-020 | Stored PDFs are named by their SHA-256 hash (`uploads/<sha256>.pdf`); the original filename is kept only as metadata | Confirmed 2026-10-22 | Repeated filenames cannot overwrite a different report; user filenames are never used as paths |
 
 The user should confirm or revise proposed decisions before they are treated as final.
 
@@ -38,6 +40,8 @@ The user should confirm or revise proposed decisions before they are treated as 
 - Is previous-year data available in a file that can be used for comparisons? (The Shega BANK table may serve; to confirm.)
 - ~~Where may sensitive PDFs, database files, and exports be stored under company policy?~~ Resolved by D-012.
 - Does the team require a particular reviewer name or approval convention? (Proposed: D-016.)
+- Should the extractor also capture figures from narrative sentences and infographics (number before label, e.g. "981 branches")? Needed for most operational metrics; see docs/manual-testing.md.
+- `eps_etb` expects ETB, but at least one bank prints EPS as a percentage. How should that be recorded?
 
 ## Change process
 

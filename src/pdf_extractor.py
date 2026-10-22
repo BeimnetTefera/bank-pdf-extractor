@@ -39,6 +39,15 @@ NARRATIVE_WINDOW = 8
 _NUMBER_TOKEN = re.compile(r"^\(?[-–—]?\d[\d,]*(\.\d+)?\)?%?$")
 _DASH_TOKEN = re.compile(r"^[-–—]$")
 _YEAR_TOKEN = re.compile(r"^(19|20)\d\d$")
+# Unit headings such as "Birr'000", "ETB '000", "Birr in thousands", "in millions of Birr".
+# The apostrophe varies (' ’ ‘ or U+FFFD when the glyph has no character), so any single
+# punctuation mark is accepted there; a digit is not ("Birr 1000" is an amount).
+_UNIT_HEADING = re.compile(
+    r"\b(?:birr|etb)\s?[^\w\s]?\s?000\b"
+    r"|\b(?:birr|etb)\s+(?:in\s+)?(?:thousands?|millions?|billions?)\b"
+    r"|\bin\s+(?:thousands|millions|billions)\s+of\s+(?:birr|etb)\b",
+    re.IGNORECASE,
+)
 _SENTENCE_PUNCTUATION = ",;:.!?\"'“”‘’"
 
 
@@ -50,6 +59,10 @@ class PageReport:
     has_text: bool
     width: float  # page size in points, for locating candidate boxes on the page
     height: float
+    # Raw layout evidence used later for units and table columns (not interpreted here):
+    unit_headings: tuple[str, ...] = ()  # e.g. "Birr'000", as printed
+    year_markers: tuple[tuple[int, float, float], ...] = ()  # (year, x centre, y centre)
+    note_headers: tuple[tuple[float, float], ...] = ()  # (x centre, y centre) of "Note(s)"
 
 
 @dataclass(frozen=True)
@@ -110,9 +123,10 @@ def extract_candidates(pdf_bytes: bytes) -> ExtractionResult:
         candidates: list[RawCandidate] = []
         for page in doc:
             words = _read_words(page)
-            pages.append(_page_report(page, words))
+            rows = _group_rows(words)
+            pages.append(_page_report(page, words, rows))
             # Low-text pages are only flagged, never skipped, so no evidence is dropped.
-            candidates.extend(_table_candidates(page.number, _group_rows(words)))
+            candidates.extend(_table_candidates(page.number, rows))
             candidates.extend(_narrative_candidates(page.number, words))
         result = ExtractionResult(page_count=doc.page_count, pages=pages, candidates=candidates)
 
@@ -150,8 +164,22 @@ def _read_words(page: pymupdf.Page) -> list[_Word]:
     return [_Word(*w[:8]) for w in page.get_text("words")]
 
 
-def _page_report(page: pymupdf.Page, words: list[_Word]) -> PageReport:
+def _page_report(page: pymupdf.Page, words: list[_Word], rows: list[list[_Word]]) -> PageReport:
     char_count = sum(len(w.text) for w in words)
+    unit_headings: list[str] = []
+    for row in rows:
+        for match in _UNIT_HEADING.finditer(" ".join(w.text for w in row)):
+            if match.group(0) not in unit_headings:
+                unit_headings.append(match.group(0))
+    years = []
+    notes = []
+    for w in words:
+        core = strip_sentence_punctuation(w.text)
+        x_mid = (w.x0 + w.x1) / 2
+        if _YEAR_TOKEN.match(core):
+            years.append((int(core), x_mid, w.y_mid))
+        elif core.lower() in ("note", "notes"):
+            notes.append((x_mid, w.y_mid))
     return PageReport(
         page_index=page.number,
         char_count=char_count,
@@ -159,6 +187,9 @@ def _page_report(page: pymupdf.Page, words: list[_Word]) -> PageReport:
         has_text=char_count >= MIN_TEXT_CHARS,
         width=page.rect.width,
         height=page.rect.height,
+        unit_headings=tuple(unit_headings),
+        year_markers=tuple(years),
+        note_headers=tuple(notes),
     )
 
 

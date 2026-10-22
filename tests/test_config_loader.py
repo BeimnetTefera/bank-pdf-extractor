@@ -165,6 +165,25 @@ def test_mapping_requires_non_empty_aliases(tmp_path: Path):
         load_mappings(path, {"total_assets_etb"})
 
 
+def test_mapping_with_sentence_phrases_only_loads(tmp_path: Path):
+    path = write(tmp_path / "mappings.yaml", """\
+        mappings:
+          - metric_id: branches
+            text_after: ["branches"]
+          - metric_id: roe_percent
+            text_before: ["Return on equity", "ROE"]
+        """)
+    branches, roe = load_mappings(path, {"branches", "roe_percent"})
+    assert branches.aliases == () and branches.text_after == ("branches",)
+    assert roe.text_before == ("Return on equity", "ROE")
+
+
+def test_mapping_needs_at_least_one_phrase_list(tmp_path: Path):
+    path = write(tmp_path / "mappings.yaml", "mappings:\n  - metric_id: branches\n")
+    with pytest.raises(ConfigError, match="add at least one of: aliases, text_after, text_before"):
+        load_mappings(path, {"branches"})
+
+
 def test_same_alias_under_two_metrics_is_allowed(tmp_path: Path):
     # The mapper (Phase 3) flags such labels as ambiguous; config must not hide them.
     path = write(tmp_path / "mappings.yaml", """\

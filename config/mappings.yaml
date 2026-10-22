@@ -1,15 +1,78 @@
-# Label aliases: the exact wording banks print for each metric in config/metrics.yaml.
+# How printed wording is linked to the metrics in config/metrics.yaml.
 #
-# Add aliases only after reviewing real bank-report labels.
+# Add wording only after seeing it in a real report, and note where it was seen.
 # Do not add assumptions about components or summation without an agreed definition.
 #
-# Format (example only, not a reviewed alias):
+# Fields (each entry needs metric_id and at least one list):
+#   aliases       exact table-row labels, e.g. "Total assets" on the balance sheet.
+#                 Matching ignores letter case, extra spaces and special characters
+#                 such as the "ﬁ" ligature.
+#   text_after    words printed right after a number in a sentence: "981 branches".
+#                 One extra word in between is allowed ("10,627 permanent employees").
+#   text_before   words printed shortly before a number in a sentence:
+#                 "Return on equity has jumped to 29%". Up to four words in between are
+#                 allowed, but no other number.
 #
-#   mappings:
-#     - metric_id: total_assets_etb      # must match an id in metrics.yaml
-#       aliases:
-#         - "Total assets"
+# A label or phrase that matches more than one metric is flagged for review; the app
+# never picks one silently.
 #
-# An alias listed under two different metrics is allowed here; the mapper will flag
-# any label that matches more than one metric for human review instead of picking one.
-mappings: []
+# Source of the entries below: Bank of Abyssinia Annual Report 2025/26 (reviewed 2026-10-22).
+# Deliberately NOT mapped yet (see docs/decisions.md D-024): total deposits table lines,
+# total revenue/expense, non-performing loans, foreign assets, NBE bills, agents,
+# mobile banking users, cardholders, deposit account holders.
+
+mappings:
+  # --- statement table rows ------------------------------------------------
+  - metric_id: total_assets_etb
+    aliases: ["Total assets"]                                   # BOA p111
+
+  - metric_id: total_liabilities_etb
+    aliases: ["Total liabilities"]                              # BOA p111
+
+  - metric_id: total_equity_etb
+    aliases: ["Total equity"]                                   # BOA p111
+
+  - metric_id: paid_up_capital_etb
+    aliases: ["Share capital", "Paid-up-capital"]               # BOA p111, p181
+
+  - metric_id: loans_and_advances_etb
+    aliases:
+      - "Loans , advances and financing to customers(Net)"      # BOA p111
+      - "Loans and advances to customers(Net)"                  # BOA p155
+
+  - metric_id: profit_before_tax_etb
+    aliases: ["Profit before tax"]                              # BOA p110, p220
+
+  - metric_id: profit_tax_etb
+    aliases: ["Income tax expense"]                             # BOA p110
+
+  - metric_id: profit_after_tax_etb
+    aliases: ["Profit after tax"]                               # BOA p110
+
+  - metric_id: eps_etb
+    aliases: ["Earnings per share"]                             # BOA p110 (printed as %)
+
+  # --- sentences -------------------------------------------------------------
+  - metric_id: total_deposits_etb
+    text_before: ["deposits to Birr"]                           # BOA p36 "deposits to Birr 318.79 billion"
+
+  - metric_id: branches
+    text_after: ["branches"]                                    # BOA p49 "981 branches"
+
+  - metric_id: atms
+    text_after: ["ATMs"]                                        # BOA p49 "1,761 ATMs"
+
+  - metric_id: pos_machines
+    text_after: ["Point of Sale"]                               # BOA p49 "6,045 Point of Sale (PoS) terminals"
+
+  - metric_id: employees
+    text_after: ["permanent employees", "employees"]            # BOA p62 "10,627 permanent employees"
+
+  - metric_id: roe_percent
+    text_before: ["Return on equity", "ROE"]                    # BOA p26, p44
+
+  - metric_id: roa_percent
+    text_before: ["RoA", "Return on assets"]                    # BOA p26
+
+  - metric_id: shareholders
+    text_before: ["number of shareholders"]                     # BOA p49

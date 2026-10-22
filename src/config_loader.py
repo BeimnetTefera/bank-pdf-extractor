@@ -40,7 +40,9 @@ class MetricDefinition:
 @dataclass(frozen=True)
 class LabelMapping:
     metric_id: str
-    aliases: tuple[str, ...]
+    aliases: tuple[str, ...] = ()  # exact table-row labels
+    text_after: tuple[str, ...] = ()  # sentence words right after the number ("981 branches")
+    text_before: tuple[str, ...] = ()  # sentence words just before the number ("ROE reached 29%")
 
 
 @dataclass(frozen=True)
@@ -155,7 +157,8 @@ def load_metrics(path: Path) -> tuple[MetricDefinition, ...]:
 
 # --- mappings.yaml -----------------------------------------------------------
 
-_MAPPING_REQUIRED = ("metric_id", "aliases")
+_MAPPING_REQUIRED = ("metric_id",)
+_MAPPING_PHRASE_LISTS = ("aliases", "text_after", "text_before")
 
 
 def load_mappings(path: Path, known_metric_ids: set[str]) -> tuple[LabelMapping, ...]:
@@ -169,7 +172,7 @@ def load_mappings(path: Path, known_metric_ids: set[str]) -> tuple[LabelMapping,
         if not isinstance(entry, dict):
             errors.append(f"{where}: expected a mapping of fields, got {type(entry).__name__}.")
             continue
-        entry_errors = _check_fields(entry, _MAPPING_REQUIRED, (), where)
+        entry_errors = _check_fields(entry, _MAPPING_REQUIRED, _MAPPING_PHRASE_LISTS, where)
         if entry_errors:
             errors.extend(entry_errors)
             continue
@@ -187,15 +190,23 @@ def load_mappings(path: Path, known_metric_ids: set[str]) -> tuple[LabelMapping,
             )
         seen_metric_ids.add(metric_id)
 
-        aliases = entry["aliases"]
-        if not isinstance(aliases, list) or not aliases:
-            errors.append(f"{where}: 'aliases' must be a non-empty list of labels.")
+        lists: dict[str, tuple[str, ...]] = {}
+        for field in _MAPPING_PHRASE_LISTS:
+            if field not in entry:
+                continue
+            values = entry[field]
+            if not isinstance(values, list) or not values:
+                errors.append(f"{where}: '{field}' must be a non-empty list of text (or be left out).")
+                continue
+            bad = [v for v in values if not _is_non_blank_str(v)]
+            if bad:
+                errors.append(f"{where}: every entry in '{field}' must be non-empty text; invalid: {bad!r}.")
+                continue
+            lists[field] = tuple(values)
+        if not any(field in entry for field in _MAPPING_PHRASE_LISTS):
+            errors.append(f"{where}: add at least one of: {', '.join(_MAPPING_PHRASE_LISTS)}.")
             continue
-        bad = [a for a in aliases if not _is_non_blank_str(a)]
-        if bad:
-            errors.append(f"{where}: every alias must be non-empty text; invalid: {bad!r}.")
-            continue
-        mappings.append(LabelMapping(metric_id=metric_id, aliases=tuple(aliases)))
+        mappings.append(LabelMapping(metric_id=metric_id, **lists))
 
     _raise_if_errors(path, errors)
     return tuple(mappings)

@@ -62,3 +62,27 @@ Notes for Phase 3:
    counted as independent confirmations.
 3. **Volume.** About 1,000 narrative candidates per report; nearly all will stay unmapped.
    Only candidates near a configured alias should reach the reviewer.
+
+## Phase 3: mapping and normalisation check (2026-10-22)
+
+Run on the same BOA report with report year `2025/26` and all 27 active metrics.
+These are observations of what the tool proposes, not verified accuracy: each suggested
+figure still needs a reviewer to check it against the page.
+
+| Result | Count | Metrics |
+|---|---|---|
+| Needs review | 13 | total assets, equity, paid-up capital, deposits (sentence), loans, PBT, PAT, ROE, ROA, branches, ATMs, POS, shareholders |
+| Flagged | 4 | total liabilities (note tables on p176–177 disagree), profit tax (statement vs note p192), EPS (printed as %), employees (several different counts in text) |
+| Not found | 10 | the metrics deliberately left unmapped (D-024) plus total assets previous year |
+
+Spot checks against the PDF pages: the suggested statement figures come from the 2026
+column of the statement of financial position (p111) and income statement (p110), with
+`Birr'000` read from the page heading; note-number columns were not picked up as values.
+
+Observations for later phases:
+1. Tax is printed in brackets on the income statement, so it normalises to a negative
+   amount (open question on sign convention).
+2. "Total liabilities" also appears in note tables (maturity/currency breakdowns) under a
+   2026 heading; these are listed as conflicting alternatives for the reviewer to dismiss.
+3. Employee counts in text include promotions and recruits; the first (10,627 permanent
+   employees) is suggested, the rest are listed as alternatives.

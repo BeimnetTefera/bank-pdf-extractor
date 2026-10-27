@@ -592,7 +592,8 @@ def load_settings(path: Path, project_root: Path = PROJECT_ROOT) -> AppSettings:
     if tesseract_raw is not None and not _is_non_blank_str(tesseract_raw):
         errors.append(f"'tesseract_dir' must be a folder path or null, got {tesseract_raw!r}.")
 
-    app_url_raw = raw.get("app_url")
+    # On a hosted copy the address is set in the host's settings, not in the file.
+    app_url_raw = os.environ.get("BANK_EXTRACTOR_APP_URL") or raw.get("app_url")
     if app_url_raw is not None and not (_is_non_blank_str(app_url_raw)
                                         and re.match(r"^https?://[^\s/]+", app_url_raw.strip())):
         errors.append(f"'app_url' must be the app's address, e.g. http://localhost:8501, got {app_url_raw!r}.")

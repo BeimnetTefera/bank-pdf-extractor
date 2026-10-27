@@ -5,6 +5,8 @@ Audit rules are enforced by the database itself, not only by application code:
 - review decisions, report events, calculated values and analysis runs are append-only
   (no UPDATE, no DELETE); so are external sources, external cross-checks and their
   withdrawals, and sector decisions (sector rows belong to no report and are never deleted).
+Documents are never changed, except a report's bank name or fiscal year (D-084, D-085): each such
+change is first logged in report_corrections, and the database refuses any other change.
 The one exception is deleting a whole report (decision D-049): it is first logged in
 report_deletions, and only rows of a report logged there can be deleted. The log itself
 can never be changed or deleted.
@@ -16,11 +18,12 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = 7  # 2: report events, calculated values, candidates.read_by_ocr; 3: decision boxes;
+SCHEMA_VERSION = 8  # 2: report events, calculated values, candidates.read_by_ocr; 3: decision boxes;
                     # 4: analysis runs (figures added to a saved report), candidates.analysis_run_id;
                     # 5: report deletions (whole reports may be deleted once logged);
                     # 6: calculated entries (input figures, calculations, calculation inputs), decisions.entry_kind;
                     # 7: external sources, external cross-checks (+ withdrawals), sector decisions
+                    # 8: report corrections (bank name / year fixed in place, logged; D-084, D-085)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS documents (
@@ -303,6 +306,46 @@ BEGIN SELECT RAISE(ABORT, 'The deletion log cannot be changed.'); END;
 
 CREATE TRIGGER IF NOT EXISTS report_deletions_no_delete BEFORE DELETE ON report_deletions
 BEGIN SELECT RAISE(ABORT, 'The deletion log cannot be deleted.'); END;
+
+-- A saved report's bank name or fiscal year fixed in place (D-084, D-085). Append-only: written
+-- first, in the same transaction as the documents update it allows.
+CREATE TABLE IF NOT EXISTS report_corrections (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id TEXT NOT NULL REFERENCES documents (id),
+    field       TEXT NOT NULL CHECK (field IN ('bank_name', 'reporting_period')),
+    old_value   TEXT NOT NULL,
+    new_value   TEXT NOT NULL,
+    reason      TEXT NOT NULL,
+    reviewer    TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS report_corrections_doc ON report_corrections (document_id);
+
+CREATE TRIGGER IF NOT EXISTS report_corrections_no_update BEFORE UPDATE ON report_corrections
+BEGIN SELECT RAISE(ABORT, 'Report corrections are append-only; record a new correction instead.'); END;
+
+CREATE TRIGGER IF NOT EXISTS report_corrections_no_delete BEFORE DELETE ON report_corrections
+WHEN NOT EXISTS (SELECT 1 FROM report_deletions WHERE document_id = OLD.document_id)
+BEGIN SELECT RAISE(ABORT, 'Report corrections cannot be deleted on their own; delete the whole report.'); END;
+
+-- A document row may change only in its bank name or fiscal year, and only to the values of the
+-- latest report_corrections row for that field (written first by report_corrections.correct_report).
+DROP TRIGGER IF EXISTS documents_no_update;
+CREATE TRIGGER documents_no_update BEFORE UPDATE ON documents
+WHEN NEW.id IS NOT OLD.id OR NEW.original_filename IS NOT OLD.original_filename
+  OR NEW.stored_path IS NOT OLD.stored_path OR NEW.sha256 IS NOT OLD.sha256
+  OR NEW.page_count IS NOT OLD.page_count OR NEW.uploaded_at IS NOT OLD.uploaded_at
+  OR NEW.processing_status IS NOT OLD.processing_status OR NEW.extractor_version IS NOT OLD.extractor_version
+  OR NEW.metric_ids IS NOT OLD.metric_ids
+  OR (NEW.bank_name IS NOT OLD.bank_name AND NOT EXISTS (
+        SELECT 1 FROM report_corrections WHERE id = (
+            SELECT MAX(id) FROM report_corrections WHERE document_id = OLD.id AND field = 'bank_name')
+        AND old_value = OLD.bank_name AND new_value = NEW.bank_name))
+  OR (NEW.reporting_period IS NOT OLD.reporting_period AND NOT EXISTS (
+        SELECT 1 FROM report_corrections WHERE id = (
+            SELECT MAX(id) FROM report_corrections WHERE document_id = OLD.id AND field = 'reporting_period')
+        AND old_value = OLD.reporting_period AND new_value = NEW.reporting_period))
+BEGIN SELECT RAISE(ABORT, 'A saved report cannot be changed; only its bank name or year can be fixed, through Fix names and years, which logs it.'); END;
 
 CREATE TRIGGER IF NOT EXISTS candidates_immutable BEFORE UPDATE ON candidates
 BEGIN SELECT RAISE(ABORT, 'Extracted candidates cannot be changed; record a review decision instead.'); END;

@@ -349,7 +349,7 @@ def test_a_version_6_database_gets_the_new_tables_and_keeps_its_rows(tmp_path):
 
     conn = connect(path)
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == database.SCHEMA_VERSION == 7
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == database.SCHEMA_VERSION >= 7
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         assert {"external_sources", "external_cross_checks", "external_cross_check_withdrawals",
                 "sector_decisions"} <= tables

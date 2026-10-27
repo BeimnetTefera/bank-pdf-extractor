@@ -419,6 +419,12 @@ def test_input_figures_need_unique_ids_and_known_units(config_dir: Path):
     assert "already used" in str(error.value) and "expected_unit must be one of" in str(error.value)
 
 
+def test_app_url_from_environment_wins(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("BANK_EXTRACTOR_APP_URL", "https://bank-extractor.streamlit.app/")
+    path = write(tmp_path / "settings.yaml", VALID_SETTINGS + "app_url: http://reviewpc:8600\n")
+    assert load_settings(path).app_url == "https://bank-extractor.streamlit.app"
+
+
 def test_app_url_must_be_an_address(tmp_path: Path):
     path = write(tmp_path / "settings.yaml", VALID_SETTINGS + "app_url: localhost\n")
     with pytest.raises(ConfigError, match="app_url"):

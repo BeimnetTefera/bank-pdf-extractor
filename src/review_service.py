@@ -270,6 +270,25 @@ def delete_report(conn: sqlite3.Connection, document_id: str, reviewer: str, rea
     changed; the database refuses to delete a report's rows unless that log entry exists.
     Exported Excel files are not changed: export the year again to update them.
     """
+    with conn:  # one transaction: all of it is deleted, or nothing
+        pending = delete_report_rows(conn, document_id, reviewer, reason)
+    return remove_unused_files(conn, pending, data_dir)
+
+
+@dataclass(frozen=True)
+class PendingDeletion:
+    """A report whose rows were deleted (in a transaction not committed yet); its files come next."""
+
+    label: str
+    approved_values: int
+    sha256: str
+    stored_path: str
+    source_files: list[sqlite3.Row]
+
+
+def delete_report_rows(conn: sqlite3.Connection, document_id: str, reviewer: str, reason: str) -> PendingDeletion:
+    """Log the deletion in report_deletions, then delete every row of the report, without
+    committing: the caller commits (delete_report, or a merge that copies decisions first, D-086)."""
     _require_reviewer(reviewer)
     _require_reason(reason, "deleting a report")
     document = get_document(conn, document_id)
@@ -279,29 +298,34 @@ def delete_report(conn: sqlite3.Connection, document_id: str, reviewer: str, rea
     label = f"{document['bank_name']} {document['reporting_period']}"
     source_files = conn.execute("SELECT DISTINCT file_sha256, media_type FROM external_sources WHERE document_id = ? "
                                 "AND file_sha256 IS NOT NULL", (document_id,)).fetchall()
-    with conn:  # one transaction: all of it is deleted, or nothing
-        conn.execute(
-            """INSERT INTO report_deletions (document_id, bank_name, reporting_period, original_filename, sha256,
-                   approved_values, reason, reviewer, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (document_id, document["bank_name"], document["reporting_period"], document["original_filename"],
-             document["sha256"], approved, reason.strip(), reviewer.strip(), utc_now()),
-        )
-        # Children first: calculation inputs point to calculations and input figures, calculations and
-        # external sources to decisions, decisions to candidates, candidates to analysis runs.
-        # Sector values (no report) are never deleted.
-        for table in ("calculation_inputs", "calculations", "external_cross_check_withdrawals",
-                      "external_cross_checks", "external_sources", "review_decisions", "input_figures", "findings",
-                      "candidates", "analysis_runs", "report_events", "calculated_values"):
-            conn.execute(f"DELETE FROM {table} WHERE document_id = ?", (document_id,))
-        conn.execute("DELETE FROM documents WHERE id = ?", (document_id,))
+    conn.execute(
+        """INSERT INTO report_deletions (document_id, bank_name, reporting_period, original_filename, sha256,
+               approved_values, reason, reviewer, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (document_id, document["bank_name"], document["reporting_period"], document["original_filename"],
+         document["sha256"], approved, reason.strip(), reviewer.strip(), utc_now()),
+    )
+    # Children first: calculation inputs point to calculations and input figures, calculations and
+    # external sources to decisions, decisions to candidates, candidates to analysis runs.
+    # Sector values (no report) are never deleted.
+    for table in ("calculation_inputs", "calculations", "external_cross_check_withdrawals",
+                  "external_cross_checks", "external_sources", "review_decisions", "input_figures", "findings",
+                  "candidates", "analysis_runs", "report_events", "calculated_values", "report_corrections"):
+        conn.execute(f"DELETE FROM {table} WHERE document_id = ?", (document_id,))
+    conn.execute("DELETE FROM documents WHERE id = ?", (document_id,))
+    return PendingDeletion(label, approved, document["sha256"], document["stored_path"], list(source_files))
+
+
+def remove_unused_files(conn: sqlite3.Connection, pending: PendingDeletion, data_dir: Path) -> DeletedReport:
+    """After the deletion is committed: remove the stored PDF, OCR words and uploaded source copies
+    that no saved report uses any more."""
     removed = []
-    still_used = conn.execute("SELECT 1 FROM documents WHERE sha256 = ?", (document["sha256"],)).fetchone()
+    still_used = conn.execute("SELECT 1 FROM documents WHERE sha256 = ?", (pending.sha256,)).fetchone()
     if not still_used:  # another saved copy of the same PDF keeps the file
-        for path in (data_dir / document["stored_path"], data_dir / "ocr" / f"{document['sha256']}.json"):
+        for path in (data_dir / pending.stored_path, data_dir / "ocr" / f"{pending.sha256}.json"):
             if path.is_file():
                 path.unlink()
                 removed.append(path.name)
-    for source in source_files:  # uploaded copies of external sources that nothing else uses
+    for source in pending.source_files:  # uploaded copies of external sources that nothing else uses
         if conn.execute("SELECT 1 FROM external_sources WHERE file_sha256 = ?", (source["file_sha256"],)).fetchone():
             continue
         extension = {"application/pdf": "pdf", "image/png": "png", "image/jpeg": "jpg"}.get(source["media_type"])
@@ -309,7 +333,7 @@ def delete_report(conn: sqlite3.Connection, document_id: str, reviewer: str, rea
         if extension and path.is_file():
             path.unlink()
             removed.append(path.name)
-    return DeletedReport(label, approved, removed)
+    return DeletedReport(pending.label, pending.approved_values, removed)
 
 
 def deletion_log(conn: sqlite3.Connection) -> list[sqlite3.Row]:

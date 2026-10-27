@@ -21,6 +21,16 @@ Fields:
 
 A corrected report has a different hash and should be a separate document record.
 
+`bank_name` is spelled as in `config/banks.yaml` and `reporting_period` is always `YYYY/YY` (D-084, D-085; Save converts "2026" to "2025/26"). A document row never changes, except these two fields through a logged correction (below); the database refuses anything else. Documents with the same `sha256` are the same PDF saved more than once and can be merged on Bank Reports (D-086).
+
+### Report correction (D-084, D-085)
+A saved report's bank name or fiscal year fixed in place on Bank Reports (*Fix names and years*). Append-only: written first, in the same transaction as the document update, and never changed or deleted (only deleted with its whole report, D-049).
+
+Fields:
+- `id`, `document_id`
+- `field` (`bank_name` or `reporting_period`), `old_value`, `new_value`
+- `reason`, `reviewer`, `created_at`
+
 ### Metric definition
 Configured in `config/metrics.yaml`.
 

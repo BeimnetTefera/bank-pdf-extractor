@@ -30,6 +30,7 @@ One internal analyst/reviewer operating the prototype locally. The prototype is 
 - Validate file extension and basic readability.
 - Show a useful error for invalid, encrypted, or unreadable PDFs.
 - Associate each document with bank, reporting period, filename, upload time, and file hash.
+- The bank is spelled as in `config/banks.yaml` and the reporting period is saved as `YYYY/YY`; when the PDF's first pages state a period end such as "30 June 2026", the Report year box is filled with that fiscal year as a suggestion (D-084, D-085).
 - Do not send documents to external services.
 
 ### FR-02: Metric selection
@@ -69,6 +70,7 @@ One internal analyst/reviewer operating the prototype locally. The prototype is 
 - Save document metadata, candidates, validation findings, and review decisions in SQLite.
 - Persist state across app restarts.
 - Avoid duplicate processing of the same document version without warning.
+- Bank Reports lists saved names and years not in their one form, fixed only when the reviewer presses Apply and logged in `report_corrections`; the same PDF saved more than once is shown as "Same PDF saved N times" with *Merge*, which copies the other copy's review decisions and deletes it through the logged delete (D-084 to D-086).
 - A corrected/replaced PDF must be treated as a new document version.
 
 ### FR-08: Excel export

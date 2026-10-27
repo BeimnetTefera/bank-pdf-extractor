@@ -61,6 +61,7 @@ from src.project_service import (
     save_analysis,
     saved_candidate_ids,
 )
+from src.report_period import canonical_period, suggested_period
 from src.review_service import ReviewError, ReviewState
 from src.sector_data import without_sector_metrics
 from src.calculated_entries import number_text, record_input_figure, saved_calculation
@@ -250,7 +251,8 @@ def _save_report(config: AppConfig, doc: dict, analysis: AnalysisResult, extract
                  allow_duplicate: bool = False) -> None:
     if _store_report(config, doc, analysis, extraction, allow_duplicate) is None:
         return
-    st.toast(f"Saved {st.session_state.bank} {st.session_state.period}. You can now approve, reject or correct "
+    period = canonical_period(st.session_state.period) or st.session_state.period  # saved as YYYY/YY (D-085)
+    st.toast(f"Saved {st.session_state.bank} {period}. You can now approve, reject or correct "
              "figures.", icon=":material/save:")
     st.rerun()
 
@@ -516,6 +518,7 @@ def _document_bar(config: AppConfig) -> dict | None:
     saved = bool(doc and doc.get("document_id"))
     names = {m.id: m.display_name for m in config.metrics}
     locked = "Saved with the report; open a new upload to change it." if saved else None
+    period_help = locked or _suggest_period(doc)
 
     with st.container(border=True):
         bank_col, period_col, metrics_col, status_col, file_col = st.columns([3, 2, 2, 2, 3], vertical_alignment="bottom")
@@ -526,7 +529,7 @@ def _document_bar(config: AppConfig) -> dict | None:
                 st.session_state.bank = None
             bank_col.selectbox("Bank", config.banks, key="bank", index=None, placeholder="Choose a bank",
                                help="From config/banks.yaml. Missing a bank? Add it there.")
-        period_col.text_input("Report year", key="period", placeholder="e.g. 2025/26", disabled=saved, help=locked)
+        period_col.text_input("Report year", key="period", placeholder="e.g. 2025/26", disabled=saved, help=period_help)
         with metrics_col.popover(f"Metrics ({len(st.session_state.metric_selection)})", icon=":material/checklist:",
                                  width="stretch", disabled=saved, help=locked):
             st.multiselect(
@@ -553,6 +556,25 @@ def _document_bar(config: AppConfig) -> dict | None:
             _load_upload(uploaded, config)
     _link_to_report(st.session_state.get("doc"))
     return st.session_state.get("doc")
+
+
+def _suggest_period(doc: dict | None) -> str | None:
+    """Fill an empty Report year box of an unsaved upload with the fiscal year its first pages state
+    (D-085), once per PDF. Only a suggestion: the reviewer can change it, and Save stores it."""
+    if doc is None or doc.get("document_id"):
+        return None
+    if st.session_state.get("_period_suggested") != doc["sha"]:
+        st.session_state._period_suggested = doc["sha"]
+        st.session_state._period_suggestion = None
+        if not (st.session_state.get("period") or "").strip():
+            suggestion = suggested_period(doc["bytes"])
+            if suggestion:
+                st.session_state.period = suggestion
+                st.session_state._period_suggestion = suggestion
+    suggestion = st.session_state.get("_period_suggestion")
+    if suggestion and st.session_state.get("period") == suggestion:
+        return f"Filled from the period end stated in the PDF ({suggestion}). Check it before saving."
+    return None
 
 
 # Streamlit drops a widget's value whenever a page without that widget is shown, so the Bank,

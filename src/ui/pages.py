@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from contextlib import closing
+from datetime import datetime, timezone
 
 import streamlit as st
 
-from src import bulk_review, ocr, review_service
+from src import bulk_review, ocr, report_corrections, report_merge, review_service
 from src.config_loader import CONFIG_DIR, AppConfig
 from src.database import connect
 from src.excel_exporter import fiscal_year_label, report_years
@@ -57,6 +58,8 @@ def bank_reports(config: AppConfig, open_report: Callable[[str], str | None]) ->
         st.info("No reports saved yet. Upload a PDF in Extract & Review and press Save report.",
                 icon=":material/inbox:")
         return
+    _fix_names_and_years(config)
+    _duplicates(config)
     if years:  # every saved report has a recognisable year (Save requires one)
         with st.container(border=True):
             st.markdown("**Export to Excel** · one workbook per fiscal year, with every bank saved for that year")
@@ -86,6 +89,120 @@ def bank_reports(config: AppConfig, open_report: Callable[[str], str | None]) ->
                 _delete_report(config, d, progress[d["id"]])
             _work_left(config, d["id"], work[d["id"]], open_report)
     _deletion_log(config)
+
+
+def _reviewer() -> str:
+    return st.session_state.get("reviewer", "")
+
+
+def _fix_names_and_years(config: AppConfig) -> None:
+    """Saved bank names and years not in their one form (D-084, D-085): each fix is applied, and
+    logged, only when the reviewer presses Apply."""
+    with closing(connect(config.settings.database_path)) as conn:
+        found = report_corrections.proposed_fixes(conn, config.banks)
+    if not found:
+        return
+    with st.container(border=True):
+        st.markdown("**Fix names and years** · each fix is logged with your name; nothing changes until you press Apply")
+        if found.fixes:
+            for fix in found.fixes:
+                st.markdown(f"{report_corrections.FIELDS[fix.field]} of {fix.label}: "
+                            f"“{fix.old_value}” → **“{fix.new_value}”**")
+            if st.button(f"Apply {len(found.fixes)} fix(es)", key="apply_fixes", type="primary"):
+                _run_fix(config, lambda conn: report_corrections.apply_fixes(
+                    conn, found.fixes, _reviewer(), config.banks), "Names and years fixed.")
+        for d in found.unmatched_banks:
+            name_col, pick_col, apply_col = st.columns([3, 3, 1], vertical_alignment="bottom")
+            name_col.markdown(f"Bank “{d['bank_name']}” is not in the bank list ({report_corrections.report_label(d)})")
+            bank = pick_col.selectbox("Choose the bank", config.banks, index=None, key=f"fix_bank_{d['id']}",
+                                      placeholder="Choose the bank")
+            if apply_col.button("Apply", key=f"apply_bank_{d['id']}", disabled=bank is None, width="stretch"):
+                _run_fix(config, lambda conn: report_corrections.correct_report(
+                    conn, d["id"], "bank_name", bank, _reviewer(), report_corrections.CHOSEN_BANK_REASON,
+                    config.banks), f"Bank set to {bank}.")
+        if found.unreadable_years:
+            st.markdown("Years that cannot be read as a fiscal year: choose the right one.")
+            choices = [fiscal_year_label(y) for y in range(utc_year() + 1, 2000, -1)]
+            for d in found.unreadable_years:
+                name_col, pick_col, apply_col = st.columns([3, 3, 1], vertical_alignment="bottom")
+                name_col.markdown(f"Year “{d['reporting_period']}” · {report_corrections.report_label(d)}")
+                year = pick_col.selectbox("Choose the year", choices, index=None, key=f"fix_year_{d['id']}",
+                                          placeholder="Choose the year")
+                if apply_col.button("Apply", key=f"apply_year_{d['id']}", disabled=year is None, width="stretch"):
+                    _run_fix(config, lambda conn: report_corrections.correct_report(
+                        conn, d["id"], "reporting_period", year, _reviewer(), report_corrections.CHOSEN_YEAR_REASON,
+                        config.banks), f"Year set to {year}.")
+
+
+def utc_year() -> int:
+    return datetime.now(timezone.utc).year
+
+
+def _run_fix(config: AppConfig, action: Callable, done: str) -> None:
+    try:
+        with closing(connect(config.settings.database_path)) as conn:
+            action(conn)
+    except review_service.ReviewError as exc:
+        st.error(str(exc), icon=":material/error:")
+        return
+    st.toast(done, icon=":material/check:")
+    st.rerun()
+
+
+def _duplicates(config: AppConfig) -> None:
+    """One banner per PDF saved more than once, with Merge (D-086). Nothing changes until Merge is pressed."""
+    with closing(connect(config.settings.database_path)) as conn:
+        groups = report_merge.duplicate_groups(conn)
+        for group in groups:
+            _duplicate_group(config, conn, group)
+
+
+def _duplicate_group(config: AppConfig, conn, group: report_merge.DuplicateGroup) -> None:
+    by_id = {d["id"]: d for d in group.documents}
+    names = {m.id: m.display_name for m in config.metrics}
+
+    def label(document_id: str) -> str:
+        d = by_id[document_id]
+        return (f"{d['bank_name']} · {d['reporting_period']} · saved {d['uploaded_at'][:16].replace('T', ' ')} UTC · "
+                f"{group.decision_counts[document_id]} decision(s) · report {document_id}")
+
+    def listed(metric_ids: list[str]) -> str:
+        return ", ".join(names.get(m, m) for m in metric_ids)
+
+    ids = [d["id"] for d in group.documents]
+    with st.container(border=True):
+        st.warning(f"**Same PDF saved {len(ids)} times** · {group.documents[0]['original_filename']}",
+                   icon=":material/content_copy:")
+        keep = st.radio("Copy to keep", ids, index=ids.index(group.default_keep), format_func=label,
+                        key=f"merge_keep_{group.sha256}")
+        others = [i for i in ids if i != keep]
+        other = others[0] if len(others) == 1 else st.selectbox(
+            "Copy to merge into it", others, format_func=label, key=f"merge_other_{group.sha256}")
+        plan = report_merge.plan_merge(conn, keep, other)
+        if plan.copy_metrics:
+            st.markdown(f"Will copy {plan.decisions_to_copy} decision(s) for: {listed(plan.copy_metrics)}.")
+        else:
+            st.markdown("No decisions to copy.")
+        if plan.same_metrics:
+            st.caption(f"Already decided the same in both copies: {listed(plan.same_metrics)}.")
+        if plan.conflicts:
+            st.markdown(f":orange[Decided differently in both copies, not copied: {listed(plan.conflicts)}.]")
+        if plan.missing_figures:
+            st.markdown(f":orange[The decided figure is not in the copy to keep, not copied: "
+                        f"{listed(plan.missing_figures)}.]")
+        for refusal in plan.refusals:
+            st.error(refusal, icon=":material/block:")
+        st.caption(f"Afterwards report {other} is deleted (logged, reason “Merged into report {keep}”). "
+                   "It cannot be undone.")
+        if st.button("Merge", key=f"merge_{group.sha256}", type="primary", disabled=not plan.allowed):
+            try:
+                result = report_merge.merge_reports(conn, keep, other, _reviewer(), config.settings.data_dir)
+            except review_service.ReviewError as exc:
+                st.error(str(exc), icon=":material/error:")
+                return
+            st.toast(f"Merged: {result.decisions_copied} decision(s) copied, {result.deleted.label} deleted.",
+                     icon=":material/merge:")
+            st.rerun()
 
 
 WORK_GROUPS = (("corrections", "Corrections awaiting approval", ":material/edit_note:"),

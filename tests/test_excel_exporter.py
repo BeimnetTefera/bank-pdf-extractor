@@ -178,7 +178,7 @@ def test_fiscal_year_label():
 def test_one_workbook_per_year_with_every_bank(saved, conn, config):
     _, document, _, _ = saved  # Synthetic Bank, saved as "2025/26"
     review.approve(conn, primary_id(saved, "total_assets_etb"), REVIEWER)
-    other = save_report(conn, config, "Zemen Bank", "2026")  # same fiscal year, typed differently
+    other = save_report(conn, config, "Zemen Bank", "2026")  # same fiscal year, typed differently (saved as 2025/26)
     next_year = save_report(conn, config, "Awash Bank", "2026/27")
     assert report_years(conn) == [2027, 2026]
 
@@ -191,7 +191,7 @@ def test_one_workbook_per_year_with_every_bank(saved, conn, config):
         ("Synthetic Bank", "2025/26"), ("Zemen Bank", "2025/26")]  # one Shega form, sorted by bank
     evidence = {e["source_document_id"]: e for e in evidence_rows(wb)}
     assert set(evidence) == {document.id, other}
-    assert evidence[other]["report_year_as_saved"] == "2026"
+    assert evidence[other]["report_year_as_saved"] == "2025/26"  # Save stores YYYY/YY (D-085)
     metadata = dict(wb[METADATA_SHEET].iter_rows(min_row=2, values_only=True))
     assert (metadata["Fiscal year"], metadata["Reports"], metadata["Exported by"]) == ("2025/26", 2, REVIEWER)
 

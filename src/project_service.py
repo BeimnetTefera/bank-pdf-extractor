@@ -18,8 +18,9 @@ from decimal import Decimal
 
 from src.candidate_queries import CandidateKey
 from src.database import utc_now
-from src.document_manager import Document
+from src.document_manager import Document, DocumentError
 from src.models import AnalysisResult, Finding, MetricCandidate
+from src.report_period import canonical_period
 
 
 @dataclass(frozen=True)
@@ -77,8 +78,12 @@ def save_analysis(
 ) -> dict[tuple[str, CandidateKey], int]:
     """Store the document, its metric candidates and findings in one transaction.
 
+    The report year is saved in its one form, YYYY/YY (D-085): "2026" is saved as "2025/26".
     Returns {(metric_id, candidate key): candidates.id}.
     """
+    period = canonical_period(document.reporting_period)
+    if period is None:
+        raise DocumentError(f"'{document.reporting_period}' is not a fiscal year. Enter it like 2025/26.")
     now = utc_now()
     ids: dict[tuple[str, CandidateKey], int] = {}
     with conn:  # commits on success, rolls back on any error
@@ -86,7 +91,7 @@ def save_analysis(
             """INSERT INTO documents (id, bank_name, reporting_period, original_filename, stored_path, sha256,
                                       page_count, uploaded_at, processing_status, extractor_version, metric_ids)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (document.id, document.bank_name, document.reporting_period, document.original_filename,
+            (document.id, document.bank_name, period, document.original_filename,
              document.stored_path, document.sha256, document.page_count, document.uploaded_at, "analysed",
              extractor_version, json.dumps([m.metric.id for m in analysis.metrics])),
         )

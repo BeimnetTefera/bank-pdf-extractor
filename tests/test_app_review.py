@@ -191,6 +191,7 @@ def test_saved_report_keeps_a_name_not_in_the_list(app):
     """Reports saved before the bank list existed were typed by hand; they still show as saved."""
     document_id = save(app)
     with closing(connect(app.db_path)) as conn:  # as saved by hand before the list existed
+        conn.execute("DROP TRIGGER documents_no_update")  # recreated by the next connect()
         conn.execute("UPDATE documents SET bank_name = ? WHERE id = ?", ("Bank of abyssinia", document_id))
         conn.commit()
     app.run()

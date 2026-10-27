@@ -110,11 +110,11 @@ def test_low_text_page_is_flagged_but_its_values_are_kept():
     assert values_by_label(result, "Total assets") == ["100"]
 
 
-def test_pdf_with_no_text_reports_ocr_not_implemented():
+def test_pdf_with_no_text_points_to_ocr():
     result = extract_candidates(make_pdf([None, None]))
     assert result.text_status == "no_text"
     assert result.candidates == []
-    assert "OCR is not implemented" in result.messages[0]
+    assert "read them with OCR" in result.messages[0]
 
 
 def test_results_are_described_as_unverified(simple_pdf):

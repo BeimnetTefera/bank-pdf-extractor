@@ -1,0 +1,14 @@
+# Table-row labels learned from reviewed reports (decision D-043).
+#
+# Written by the app: in Extract & Review, "Learn wording" offers the label of each value
+# a reviewer approved from a row the app did not recognise. Each entry is used like an
+# alias in mappings.yaml, but only for reports of its `bank` (decision D-046). To remove
+# one, delete its entry here and reload the app.
+
+learned:
+- bank: Wegagen bank
+  metric_id: dividends_paid_etb
+  alias: Dividend paid
+  seen_in: Wegagen bank 2025/26, PDF page 50
+  added_by: beimn
+  added_at: '2026-10-26T07:59:33+00:00'

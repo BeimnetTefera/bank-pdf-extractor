@@ -85,9 +85,21 @@ Fields:
 
 Never mutate the original candidate to make it look as if the extractor produced the corrected value. A correction is a distinct decision.
 
+### Analysis run (D-044)
+Figures added to a saved report after its wording changed (e.g. a label learned from a review). Append-only.
+
+Fields:
+- `id`, `document_id`
+- `extractor_version` (must equal the version the report was saved with)
+- `candidates_added`, `findings_added`
+- `reviewer`, `created_at`
+
+Each added candidate stores its `analysis_run_id`; candidates saved with the report have none. Earlier candidates, findings and decisions are never changed.
+
 ## 2. Relationships
 
 ```text
+Document 1 ---- many AnalysisRun 1 ---- many Candidate (added later)
 Document 1 ---- many Candidate
 Candidate 1 ---- many ValidationFinding
 Candidate 1 ---- many ReviewDecision

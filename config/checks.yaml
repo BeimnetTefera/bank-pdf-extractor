@@ -1,0 +1,25 @@
+# Arithmetic checks between figures of the same report (decision D-045).
+#
+# Each check says: total = sum of the parts. Signs are ignored (the size of each
+# figure is used), because banks print expenses such as tax in brackets and the
+# reviewer records either sign (D-028). The allowed difference is the rounding of the
+# printed figures (half of the last printed digit of each).
+#
+# Checks are advisory: they show the reviewer where to look. They never change,
+# approve or reject a figure. Results are shown under the metric table in
+# Extract & Review, using approved figures where there are any and the suggested
+# figures otherwise.
+#
+# Fields: id (snake_case), name (shown to the reviewer), total (metric id),
+#         parts (list of metric ids, same unit as the total).
+
+checks:
+  - id: balance_sheet
+    name: "Total assets = total liabilities + total equity"
+    total: total_assets_etb
+    parts: [total_liabilities_etb, total_equity_etb]
+
+  - id: profit_and_tax
+    name: "Profit before tax = profit after tax + income tax"
+    total: profit_before_tax_etb
+    parts: [profit_after_tax_etb, profit_tax_etb]

@@ -100,10 +100,14 @@ def test_prior_year_difference_is_reported_as_info(result):
     assert conflict.severity == "info" and "10,101,095" in conflict.message and "10,101,094" in conflict.message
 
 
-def test_different_current_values_flag_the_metric(result):
+def test_note_figure_that_differs_from_the_statement_is_an_info_note(result):
+    # The statement page (title + several metrics) wins; a note printing another figure under the
+    # same label is shown, not a conflict (D-062). Conflicts with sentences still flag: test_extraction_rules.
     equity = result.metric("total_equity_etb")
-    assert equity.status == "flagged"
-    assert any(f.rule_id == "CONFLICT" and "500,000" in f.message and "512,000" in f.message for f in equity.findings)
+    assert equity.primary.mapped.candidate.raw_value_text == "500,000"
+    assert equity.status == "needs_review"
+    (note,) = [f for f in equity.findings if f.rule_id == "NOTE-DIFFERS"]
+    assert note.severity == "info" and "512,000" in note.message and "500,000" in note.message
 
 
 def test_dash_is_flagged_not_zero(result):

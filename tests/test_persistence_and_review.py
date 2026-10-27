@@ -24,11 +24,14 @@ STATEMENT = [
     ("Income tax expense", ["15", "(4,313,629)", "(2,802,590)"]),
     ("Total equity", ["", "500,000", "-"]),
 ]
+# A second statement (not a note: a note that differs is only an info note, D-062), so the two
+# this-year equity figures conflict and flag the metric.
 NOTES = [
-    ("NOTES TO THE FINANCIAL STATEMENTS", []),
+    ("SYNTHETIC BANK S.C. STATEMENT OF FINANCIAL POSITION (RESTATED)", []),
     ("", ["Notes", "2026", "2025"]),
     ("Birr'000", []),
     ("Total equity", ["", "512,000", "400,000"]),
+    ("Income tax expense", ["15", "(4,313,629)", "(2,802,590)"]),
 ]
 MAPPINGS = (
     LabelMapping("total_assets_etb", aliases=("Total assets",)),
@@ -234,6 +237,62 @@ def test_decisions_cannot_be_edited_or_deleted(saved, conn):
 def test_candidates_cannot_be_changed(conn):
     with pytest.raises(sqlite3.DatabaseError, match="cannot be changed"):
         conn.execute("UPDATE candidates SET raw_value_text = '999'")
+
+
+# --- deleting a whole report (D-049) ------------------------------------------------------
+
+def test_delete_report_removes_everything_and_logs_it(saved, conn, settings):
+    _, document, _, _ = saved
+    review.approve(conn, primary_id(saved, "total_assets_etb"), REVIEWER)
+    review.finish_extraction(conn, document.id, REVIEWER)
+    pdf = settings.data_dir / document.stored_path
+    assert pdf.is_file()
+
+    deleted = review.delete_report(conn, document.id, REVIEWER, "Demo upload", settings.data_dir)
+    assert (deleted.label, deleted.approved_values) == ("Synthetic Bank 2025/26", 1)
+    assert not pdf.exists() and pdf.name in deleted.files_removed
+    assert list_documents(conn) == []
+    for table in ("candidates", "findings", "review_decisions", "report_events"):
+        assert conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0] == 0
+    (log,) = review.deletion_log(conn)
+    assert (log["bank_name"], log["reason"], log["reviewer"], log["approved_values"]) == (
+        "Synthetic Bank", "Demo upload", REVIEWER, 1)
+    with pytest.raises(sqlite3.DatabaseError, match="deletion log"):
+        conn.execute("DELETE FROM report_deletions")
+    with pytest.raises(sqlite3.DatabaseError, match="deletion log"):
+        conn.execute("UPDATE report_deletions SET reason = 'x'")
+
+
+def test_delete_needs_a_reason_and_a_reviewer(saved, conn, settings):
+    _, document, _, _ = saved
+    with pytest.raises(ReviewError, match="reason"):
+        review.delete_report(conn, document.id, REVIEWER, " ", settings.data_dir)
+    with pytest.raises(ReviewError, match="reviewer"):
+        review.delete_report(conn, document.id, "", "Demo", settings.data_dir)
+    assert len(list_documents(conn)) == 1
+
+
+def test_another_saved_copy_keeps_the_pdf(saved, conn, settings):
+    _, document, analysis, _ = saved
+    copy = store_document((settings.data_dir / document.stored_path).read_bytes(), "synthetic.pdf",
+                          "Synthetic Bank", "2025/26", settings)
+    save_analysis(conn, copy, analysis, EXTRACTOR_VERSION)
+    deleted = review.delete_report(conn, document.id, REVIEWER, "Saved twice", settings.data_dir)
+    assert deleted.files_removed == []
+    assert (settings.data_dir / copy.stored_path).is_file()
+    assert [r["id"] for r in list_documents(conn)] == [copy.id]
+    assert load_candidates(conn, copy.id)  # the other copy is untouched
+
+
+def test_single_rows_still_cannot_be_deleted(saved, conn):
+    _, document, _, _ = saved
+    review.approve(conn, primary_id(saved, "total_assets_etb"), REVIEWER)
+    with pytest.raises(sqlite3.DatabaseError, match="append-only"):
+        conn.execute("DELETE FROM review_decisions")
+    with pytest.raises(sqlite3.DatabaseError, match="delete the whole report"):
+        conn.execute("DELETE FROM candidates")
+    with pytest.raises(sqlite3.DatabaseError, match="Delete report"):
+        conn.execute("DELETE FROM documents")
 
 
 def test_only_approved_metrics_reach_approved_results(saved, conn):

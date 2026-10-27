@@ -1,7 +1,7 @@
 import pytest
 
 from src.config_loader import LabelMapping
-from src.metric_mapper import MetricMapper, normalize_text
+from src.metric_mapper import MetricMapper, normalize_text, strip_note_reference
 from src.pdf_extractor import NARRATIVE_METHOD, TABLE_METHOD, RawCandidate
 
 MAPPINGS = (
@@ -43,6 +43,19 @@ def test_ligature_and_odd_spacing_are_normalised():
 def test_partial_label_does_not_match():
     assert metric_ids(table("Total assets held for sale")) == []
     assert metric_ids(table("Average total assets")) == []
+
+
+@pytest.mark.parametrize("label", ["Total assets 16", "Total assets 16 (c)", "Total assets 31(c)", "Total assets »",
+                                   "Profit before tax 3 *%"])
+def test_trailing_note_reference_is_ignored(label):
+    expected = "profit_before_tax_etb" if label.startswith("Profit") else "total_assets_etb"
+    assert metric_ids(table(label)) == [expected]
+
+
+def test_only_the_end_of_a_label_is_stripped():
+    assert metric_ids(table("Total assets 2026")) == []  # a year is not a note reference
+    assert metric_ids(table("Total 16 assets")) == []  # words inside the label stay
+    assert strip_note_reference("note 16") == "note"
 
 
 def test_unknown_label_stays_unmapped():

@@ -7,7 +7,7 @@ reason is returned so the candidate can be flagged for review.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 
 _DASHES = {"-", "–", "—"}
@@ -49,3 +49,13 @@ def parse_number(text: str) -> ParsedNumber:
     value = Decimal(digits)
     decimals = len(digits.split(".")[1]) if "." in digits else 0
     return ParsedNumber(-value if negative else value, is_percent, decimals)
+
+
+_PERCENT_WORDS = re.compile(r"^(?:percent|per\s+cent|pct)\b", re.IGNORECASE)
+
+
+def with_percent_word(parsed: ParsedNumber, text_after: str) -> ParsedNumber:
+    """A sentence number followed by the word "percent" ("6.6 percent") is a percentage."""
+    if parsed.value is None or parsed.is_percent or not _PERCENT_WORDS.match(text_after.strip()):
+        return parsed
+    return replace(parsed, is_percent=True)

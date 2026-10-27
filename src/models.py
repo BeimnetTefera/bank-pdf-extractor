@@ -31,6 +31,7 @@ class MappedCandidate:
     period: str
     duplicate_of: CandidateKey | None = None  # same printed number already caught by a table row
     in_chart_row: bool = False  # table row that also holds a year: label/value pairing unreliable
+    block: int = 0  # column block of the page the value is in (0 unless tables sit side by side)
 
     @property
     def key(self) -> CandidateKey:

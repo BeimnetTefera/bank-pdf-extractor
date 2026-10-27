@@ -6,9 +6,16 @@ Only navigation lives here; each screen is in src/ui/.
 import streamlit as st
 
 from src.config_loader import ConfigError, load_config
-from src.ui import extract_review, pages
+from src.ui import calculations, evidence_page, extract_review, pages, routes, sector_page
 
-st.set_page_config(page_title="Bank PDF Extractor", page_icon=":material/account_balance:", layout="wide")
+# "expanded" rather than the default "auto": with "auto" the browser re-decides on window
+# width each time the sidebar is redrawn, so it could close by itself after a rerun.
+st.set_page_config(
+    page_title="Bank PDF Extractor",
+    page_icon=":material/account_balance:",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
 try:
     config = load_config()
@@ -23,11 +30,19 @@ def home_page() -> None:
 
 
 def extract_review_page() -> None:
-    extract_review.render(config)
+    extract_review.render(config, open_calculations=_open_calculations)
+
+
+def calculations_page() -> None:
+    calculations.render(config, open_report=_open_report)
 
 
 def bank_reports_page() -> None:
-    pages.bank_reports()
+    pages.bank_reports(config, open_report=_open_report)
+
+
+def sector_data_page() -> None:
+    sector_page.render(config)
 
 
 def templates_page() -> None:
@@ -38,22 +53,60 @@ def settings_page() -> None:
     pages.settings(config)
 
 
+def evidence() -> None:
+    evidence_page.render_evidence(config)
+
+
+def evidence_summary() -> None:
+    evidence_page.render_summary(config)
+
+
 app_pages = [
     st.Page(home_page, title="Home", icon=":material/home:", url_path="home"),
     st.Page(extract_review_page, title="Extract & Review", icon=":material/fact_check:", url_path="extract_review", default=True),
+    st.Page(calculations_page, title="Calculations", icon=":material/calculate:", url_path="calculations"),
     st.Page(bank_reports_page, title="Bank Reports", icon=":material/account_balance:", url_path="bank_reports"),
+    st.Page(sector_data_page, title="Sector data", icon=":material/public:", url_path="sector_data"),
     st.Page(templates_page, title="Templates", icon=":material/description:", url_path="templates"),
     st.Page(settings_page, title="Settings", icon=":material/settings:", url_path="settings"),
 ]
+# Reached by links that name a report (and metric), so they stay out of the menu.
+evidence_pages = {
+    "evidence": st.Page(evidence, title="Evidence", icon=":material/verified:", url_path="evidence",
+                        visibility="hidden"),
+    "evidence_summary": st.Page(evidence_summary, title="Evidence summary", icon=":material/table_view:",
+                                url_path="evidence_summary", visibility="hidden"),
+}
+routes.register(extract_review=app_pages[1], bank_reports=app_pages[3], sector_data=app_pages[4], **evidence_pages)
+
+
+def _open_report(document_id: str) -> str | None:
+    error = extract_review.open_saved(config, document_id)
+    if error is None:
+        st.switch_page(app_pages[1])
+    return error
+
+
+def _open_calculations(document_id: str) -> None:
+    st.session_state.calc_document = document_id
+    st.switch_page(app_pages[2])
+
+
 # Hidden built-in menu so the app title can sit above our own menu, as in the mockup.
-navigation = st.navigation(app_pages, position="hidden")
+navigation = st.navigation([*app_pages, *evidence_pages.values()], position="hidden")
+
+# The address form ?page=evidence&report=<id>&metric=<id> leads to the Evidence pages too.
+if st.query_params.get("page") in evidence_pages:
+    target = evidence_pages[st.query_params["page"]]
+    st.switch_page(target, query_params={k: v for k, v in st.query_params.items() if k != "page"})
 
 with st.sidebar:
     st.markdown("### :material/account_balance: Bank PDF Extractor")
     for page in app_pages:
         st.page_link(page)
     st.divider()
-    st.caption(f"Reviewer: {config.settings.default_reviewer}")
+    st.session_state.reviewer = st.session_state.get("reviewer", config.settings.default_reviewer)
+    st.text_input("Reviewer", key="reviewer", help="Saved with every review decision. No login in this prototype.")
     st.caption("Local prototype · documents stay on this computer")
 
 navigation.run()

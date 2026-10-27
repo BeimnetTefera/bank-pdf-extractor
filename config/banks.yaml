@@ -1,0 +1,43 @@
+# Banks offered in the "Bank" dropdown of Extract & Review.
+#
+# The chosen name is saved with the report and exported in the `bank` column, so names
+# are spelled exactly as in the Shega bank timeseries spreadsheet
+# (final_timeseries_all_banks.csv, 2026-10-22): 29 banks.
+#
+# Differences from the National Bank of Ethiopia register
+# (https://nbe.gov.et/financial-institutions/banks/, checked 2026-10-22):
+#   - "Lion bank" is now registered as Anbesa Bank (renamed 2026); kept as in the dataset.
+#   - "Goh Bank" is registered as Goh Betoch Bank; kept as in the dataset.
+#   - Omo Bank and Siket Bank are licensed but not in the dataset yet.
+# To add a bank, add a line; no code change is needed.
+
+banks:
+  - Abay bank
+  - Addis Bank
+  - Ahadu bank
+  - Amhara bank
+  - Awash bank
+  - Bank of Abyssinia
+  - Berhan bank
+  - Bunna bank
+  - Commercial Bank of Ethiopia
+  - Cooperative bank of Oromia
+  - Dashen bank
+  - Enat bank
+  - Gadaa Bank
+  - Global bank
+  - Goh Bank
+  - Hibret bank
+  - Hijra Bank
+  - Lion bank
+  - Nib bank
+  - Oromia bank
+  - Rammis bank
+  - Shabelle bank
+  - Sidama bank
+  - Siinqee bank
+  - Tsedey bank
+  - Tsehay bank
+  - Wegagen bank
+  - Zamzam bank
+  - Zemen bank

@@ -13,3 +13,13 @@ max_pages: 1000
 # Name recorded with each approve/reject/correct decision ("who reviewed this").
 # Leave empty to use the Windows user name; it can be changed in the app.
 default_reviewer: null
+
+# Folder where Tesseract OCR is installed (it holds tesseract.exe and tessdata\), used to
+# read reports whose pages are pictures. Leave empty to find it automatically (PATH, then
+# C:\Program Files\Tesseract-OCR). OCR runs on this computer only.
+tesseract_dir: null
+
+# The app's address. Every value cell in the Excel export, and the evidence PDF, links to the
+# value's Evidence page at this address, so the links open only where the app is running here.
+# Keep the port the same as [server] port in .streamlit/config.toml.
+app_url: http://localhost:8501

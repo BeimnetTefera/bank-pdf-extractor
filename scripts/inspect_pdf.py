@@ -70,6 +70,12 @@ def main(argv: list[str] | None = None) -> int:
     print_summary(args.pdf.name, len(data), sha256, result)
 
     if args.page is not None:
+        page = result.pages[args.page - 1]
+        if page.column_blocks:  # tables side by side, read separately
+            blocks = ", ".join(f"x {x0:.0f}-{x1:.0f}" for x0, x1 in page.column_blocks)
+            print(f"\nPDF page {args.page} is read as {len(page.column_blocks)} column blocks: {blocks}")
+        for title, _, _ in page.statement_titles:
+            print(f"Statement title: {title}")
         print_rows(f"PDF page {args.page}", [c for c in result.candidates if c.page_index == args.page - 1])
     if args.find:
         print_rows(f"matches for '{args.find}'", [c for c in result.candidates if matches(c, args.find)])

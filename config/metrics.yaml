@@ -8,7 +8,10 @@
 #
 # Fields
 #   id             stable snake_case ID used inside this app
-#   shega_column   exact column name in the Shega dataset (case-sensitive)
+#   shega_column   exact column name in the Shega pipeline's BANK table (case-sensitive)
+#   export_column  optional: the column it fills in the Excel export's "Approved Data"
+#                  sheet; must be listed in export_template.yaml. Without it, an approved
+#                  value appears only in the "Source Evidence" sheet
 #   display_name   label shown in the UI
 #   definition     what the metric means
 #   expected_unit  one of: ETB | count | fraction | ratio
@@ -18,6 +21,22 @@
 #                    ratio    one quantity per another (e.g. ATMs per branch)
 #   active         true = selectable in the UI
 #   notes          optional caveats
+#   formula        optional standard calculation (D-052): metric ids, <metric id>_prev for the
+#                  previous year, ids from input_figures (end of file), + - * / ( ) and
+#                  avg, sum, abs, min, max. Offered under Calculate in Metric Details
+#   basis          optional machine-readable name of that calculation's basis, e.g. average_equity
+#   level          optional: bank (default, read from each bank's report) or sector (one value
+#                  per fiscal year for the whole banking sector, recorded on the Sector data page
+#                  from an external source and exported in every bank's row of that year, D-056)
+#   sign           optional: how a figure printed in brackets, e.g. (1,357,194), is recorded by
+#                  default (D-068). positive (default): an amount such as tax, dividends paid or
+#                  deposits is stored as a positive number and the printed direction is kept as
+#                  evidence. as_printed: the metric can really be negative (profit, returns), so
+#                  brackets are stored as a negative number. The reviewer can still choose.
+#   count_in_thousands_below
+#                  optional, count metrics only (D-069): a count printed under a "'000" heading
+#                  that is below this number is read in thousands and multiplied by 1,000 (Zemen
+#                  prints 12,538 for 12,538,000 shares); a larger one is taken as printed
 #
 # Derived metrics (ratios calculated from other columns) are inactive: the app must not
 # calculate them until a calculation policy is agreed.
@@ -26,6 +45,7 @@ metrics:
   # --- Balance sheet -------------------------------------------------------
   - id: total_assets_etb
     shega_column: total_assets_etb
+    export_column: "Total Assets"
     display_name: Total assets
     definition: "Sum of all assets owned or controlled by the institution valued in Ethiopian Birr (ETB). Encompasses cash, loans, investments, fixed assets, and other holdings."
     expected_unit: ETB
@@ -41,6 +61,7 @@ metrics:
 
   - id: total_liabilities_etb
     shega_column: total_liabilities_etb
+    export_column: "Total Liabilities"
     display_name: Total liabilities
     definition: "Total obligations and debts owed by the institution to depositors, creditors, and other parties, denominated in Ethiopian Birr (ETB)."
     expected_unit: ETB
@@ -48,6 +69,7 @@ metrics:
 
   - id: total_equity_etb
     shega_column: total_equity_etb
+    export_column: "Total Equity"
     display_name: Total equity
     definition: "Shareholders' equity: the residual interest in the institution's assets after deducting all liabilities (paid-up capital + reserves + retained earnings), in ETB."
     expected_unit: ETB
@@ -55,6 +77,7 @@ metrics:
 
   - id: paid_up_capital_etb
     shega_column: paid_up_capital_etb
+    export_column: "Paid-up Capital"
     display_name: Paid-up capital
     definition: "Portion of issued share capital that has been fully paid by shareholders, as registered with the National Bank of Ethiopia, in ETB."
     expected_unit: ETB
@@ -62,6 +85,7 @@ metrics:
 
   - id: total_deposits_etb
     shega_column: total_deposits_etb
+    export_column: "Total Deposits"
     display_name: Total deposits
     definition: "Total customer deposits held by the bank (demand, savings, and time deposits combined) at the end of the fiscal year, in Ethiopian Birr (ETB)."
     expected_unit: ETB
@@ -70,6 +94,7 @@ metrics:
 
   - id: loans_and_advances_etb
     shega_column: loans_and_advances_etb
+    export_column: "Total Loans"
     display_name: Loans and advances (net)
     definition: "Net outstanding balance of loans and advances extended to borrowers (gross loans less provisions for loan losses), in Ethiopian Birr (ETB)."
     expected_unit: ETB
@@ -77,6 +102,7 @@ metrics:
 
   - id: non_performing_loans_etb
     shega_column: NonPerformingLoanEtb
+    export_column: "Non-Performing Loans"
     display_name: Non-performing loans
     definition: "Gross carrying value of loans classified as non-performing (overdue beyond 90 days or otherwise unlikely to be recovered), in Ethiopian Birr (ETB)."
     expected_unit: ETB
@@ -91,6 +117,7 @@ metrics:
 
   - id: nbe_bills_etb
     shega_column: NbeBillsEtb
+    export_column: "NBE Bills"
     display_name: NBE bills
     definition: "National Bank of Ethiopia (NBE) bills and mandatory government treasury instruments held by the bank under the NBE investment directive, in ETB."
     expected_unit: ETB
@@ -107,6 +134,7 @@ metrics:
   # --- Income statement ----------------------------------------------------
   - id: total_revenue_etb
     shega_column: total_revenue_etb
+    export_column: "Total Revenue"
     display_name: Total revenue
     definition: "Total income earned from all sources (interest income, fees, commissions, and other operating income) during the fiscal year, in Ethiopian Birr (ETB)."
     expected_unit: ETB
@@ -114,6 +142,7 @@ metrics:
 
   - id: total_expense_etb
     shega_column: total_expense_etb
+    export_column: "Total Expense"
     display_name: Total expense
     definition: "Total operating and non-operating expenses incurred during the fiscal year, in Ethiopian Birr (ETB)."
     expected_unit: ETB
@@ -121,13 +150,16 @@ metrics:
 
   - id: profit_before_tax_etb
     shega_column: profit_before_tax_etb
+    export_column: "Profit Before Tax (Reported)"
     display_name: Profit before tax
+    sign: as_printed
     definition: "Earnings Before Tax (EBT): net operating profit after all expenses but before deducting corporate income tax, in Ethiopian Birr (ETB)."
     expected_unit: ETB
     active: true
 
   - id: profit_tax_etb
     shega_column: profit_tax_etb
+    export_column: "Profit tax"
     display_name: Profit tax
     definition: "Corporate income tax charged on the institution's taxable profit for the fiscal year, in ETB."
     expected_unit: ETB
@@ -135,7 +167,9 @@ metrics:
 
   - id: profit_after_tax_etb
     shega_column: profit_after_tax_etb
+    export_column: "Profit After Tax (Reported)"
     display_name: Profit after tax
+    sign: as_printed
     definition: "Net profit remaining after deducting corporate income tax from profit before tax. Represents the bank's bottom-line earnings attributable to shareholders, in ETB."
     expected_unit: ETB
     active: true
@@ -143,30 +177,44 @@ metrics:
   # --- Returns (as reported) -----------------------------------------------
   - id: roe_percent
     shega_column: roe_percent
+    export_column: "Return on Equity (ROE) (Reported)"
     display_name: Return on equity (ROE)
+    sign: as_printed
     definition: "Return on Equity: net income relative to shareholders' equity. Stored as a decimal fraction, not a 0-100 percentage: 0.1400 means 14%."
     expected_unit: fraction
     active: true
-    notes: "Extract only as printed in the report; do not calculate."
+    notes: "Use the printed figure when the report states it; otherwise calculate it with the formula below (D-052)."
+    formula: "profit_after_tax_etb / avg(total_equity_etb, total_equity_etb_prev)"
+    basis: average_equity
 
   - id: roa_percent
     shega_column: roa_percent
+    export_column: "Return on Assets (ROA) (Reported)"
     display_name: Return on assets (ROA)
+    sign: as_printed
     definition: "Return on Assets: net income relative to total assets. Stored as a decimal fraction, not a 0-100 percentage: 0.0400 means 4%."
     expected_unit: fraction
     active: true
-    notes: "Extract only as printed in the report; do not calculate."
+    notes: "Use the printed figure when the report states it; otherwise calculate it with the formula below (D-052)."
+    formula: "profit_after_tax_etb / avg(total_assets_etb, total_assets_etb_prev)"
+    basis: average_total_assets
 
   - id: eps_etb
     shega_column: eps_etb
+    export_column: "Earning per share (EPS) (Reported)"
     display_name: Earnings per share (EPS)
+    sign: as_printed
     definition: "Earnings Per Share: net profit attributable to each ordinary share outstanding, in Ethiopian Birr (ETB)."
     expected_unit: ETB
     active: true
+    notes: "Ethiopian reports often print EPS as a percentage of the share's par value (e.g. 39% of Birr 1,000 = Birr 390)."
+    formula: "eps_percent * par_value"
+    basis: percent_of_par_value
 
   # --- Operations and outreach ---------------------------------------------
   - id: branches
     shega_column: branches
+    export_column: "Number of Branches"
     display_name: Branches
     definition: "Total number of physical branch offices operated by the bank during the fiscal year, as reported to the National Bank of Ethiopia."
     expected_unit: count
@@ -174,6 +222,7 @@ metrics:
 
   - id: atms
     shega_column: atms
+    export_column: "Number of ATMs"
     display_name: ATMs
     definition: "Total number of Automated Teller Machines (ATMs) deployed and operational during the fiscal year."
     expected_unit: count
@@ -181,6 +230,7 @@ metrics:
 
   - id: pos_machines
     shega_column: pos_machines
+    export_column: "Number of POS Machines"
     display_name: POS machines
     definition: "Total number of Point-of-Sale (POS) card payment terminals deployed at merchant locations during the fiscal year."
     expected_unit: count
@@ -188,6 +238,7 @@ metrics:
 
   - id: agents
     shega_column: agents
+    export_column: "Number of Agents"
     display_name: Banking agents
     definition: "Total number of banking agents (outsourced third-party service delivery points authorized by NBE) active during the fiscal year."
     expected_unit: count
@@ -195,6 +246,7 @@ metrics:
 
   - id: employees
     shega_column: Employees
+    export_column: "Number of Employees"
     display_name: Employees
     definition: "Total number of full-time equivalent employees on the bank's payroll at the end of the fiscal year."
     expected_unit: count
@@ -202,6 +254,7 @@ metrics:
 
   - id: shareholders
     shega_column: Shareholders
+    export_column: "Number of Shareholders"
     display_name: Shareholders
     definition: "Total number of registered shareholders holding equity in the bank."
     expected_unit: count
@@ -209,6 +262,7 @@ metrics:
 
   - id: deposit_account_holders
     shega_column: deposit_account_holders
+    export_column: "Number of Deposit Account Holders"
     display_name: Deposit account holders
     definition: "Total number of individual and corporate customers holding at least one active deposit account at the bank."
     expected_unit: count
@@ -216,6 +270,7 @@ metrics:
 
   - id: mobile_banking_users
     shega_column: mobile_banking_users
+    export_column: "Number of Mobile Banking Users"
     display_name: Mobile banking users
     definition: "Number of customers registered for and actively using the bank's mobile banking platform during the reporting period."
     expected_unit: count
@@ -223,6 +278,7 @@ metrics:
 
   - id: cardholders
     shega_column: cardholders
+    export_column: "Number of Cardholders"
     display_name: Cardholders
     definition: "Total number of customers holding active payment cards (debit, credit, or prepaid) issued by the bank."
     expected_unit: count
@@ -284,3 +340,131 @@ metrics:
     expected_unit: fraction
     active: false
     notes: "Likely derived. Activate if reports print this figure directly."
+
+  # --- Further extracted columns of the Shega bank timeseries spreadsheet ---
+  # Not in the pipeline's BANK table (no shega_column). No label aliases yet, so they show
+  # as "Not found" until aliases are added; reviewers enter them with "Enter manually".
+  # Definitions are provisional, written for this app.
+
+  - id: deposits_with_foreign_banks_etb
+    export_column: "Deposit with Foreign banks"
+    display_name: Deposits with foreign banks
+    definition: "Balances the bank holds with banks abroad (nostro and placements with foreign banks), in ETB."
+    expected_unit: ETB
+    active: true
+
+  - id: foreign_liabilities_etb
+    export_column: "Foreign Liabilities"
+    display_name: Foreign liabilities
+    definition: "Obligations owed to non-residents or in foreign currency, in ETB."
+    expected_unit: ETB
+    active: true
+
+  - id: mobile_and_internet_banking_users
+    export_column: "Number of Mobile Banking and Internet Banking Users"
+    display_name: Mobile and internet banking users
+    definition: "Number of customers registered for mobile or internet banking, as one combined figure."
+    expected_unit: count
+    active: true
+    formula: "mobile_banking_users + internet_banking_users"
+    basis: sum_of_channels
+
+  - id: internet_banking_users
+    export_column: "Number of Internet Banking Users"
+    display_name: Internet banking users
+    definition: "Number of customers registered for internet banking."
+    expected_unit: count
+    active: true
+
+  - id: operating_expense_etb
+    export_column: "Operating Expense"
+    display_name: Operating expense
+    definition: "Operating expenses for the fiscal year (staff costs, general and administrative expenses, depreciation), in ETB."
+    expected_unit: ETB
+    active: true
+    formula: "net_operating_income - profit_before_tax_etb"
+    basis: operating_income_less_profit_before_tax
+
+  - id: operating_income_etb
+    export_column: "Operating Income"
+    display_name: Operating income
+    definition: "Total operating income for the fiscal year (net interest income plus fee, commission and other operating income), in ETB."
+    expected_unit: ETB
+    active: true
+
+  - id: net_interest_income_etb
+    export_column: "Net Interest Income"
+    display_name: Net interest income
+    definition: "Interest income minus interest expense for the fiscal year, in ETB."
+    expected_unit: ETB
+    active: true
+
+  - id: dividends_paid_etb
+    export_column: "Dividends Paid"
+    display_name: Dividends paid
+    definition: "Cash dividends paid to shareholders during the fiscal year, in ETB."
+    expected_unit: ETB
+    active: true
+
+  - id: total_regulatory_capital_etb
+    export_column: "Total Regulatory Capital"
+    display_name: Total regulatory capital
+    definition: "Capital eligible under National Bank of Ethiopia capital adequacy rules, in ETB."
+    expected_unit: ETB
+    active: true
+
+  - id: risk_weighted_assets_etb
+    export_column: "Risk weighted assets"
+    display_name: Risk-weighted assets
+    definition: "Assets weighted by credit (and other) risk under National Bank of Ethiopia rules, in ETB."
+    expected_unit: ETB
+    active: true
+
+  - id: weighted_average_shares
+    export_column: "Weighted average number of ordinary shares issued"
+    display_name: Weighted average ordinary shares
+    count_in_thousands_below: 1000000
+    definition: "Weighted average number of ordinary shares outstanding during the year, as used for earnings per share."
+    expected_unit: count
+    active: true
+
+  - id: current_assets_etb
+    export_column: "Current Assets"
+    display_name: Current assets
+    definition: "Assets maturing or convertible to cash within one year, in ETB (used for the liquidity ratio)."
+    expected_unit: ETB
+    active: true
+
+  - id: current_liabilities_etb
+    export_column: "Current Liabilities"
+    display_name: Current liabilities
+    definition: "Liabilities due within one year, in ETB (used for the liquidity ratio)."
+    expected_unit: ETB
+    active: true
+
+  - id: sector_total_deposits_etb
+    export_column: "Total deposit in the sector"
+    display_name: Total deposits in the sector
+    definition: "Total deposits of the whole Ethiopian banking sector for the fiscal year, in ETB (a sector figure, usually from the National Bank of Ethiopia, not the bank's report)."
+    expected_unit: ETB
+    active: true
+    level: sector
+
+# Figures that are not metrics themselves but feed a formula (D-052). A reviewer marks them
+# on the report page when calculating; each is stored with its page and box as evidence.
+# Fields: id (snake_case, not a metric id), display_name, expected_unit, definition.
+input_figures:
+  - id: eps_percent
+    display_name: EPS as printed (percent of par value)
+    expected_unit: fraction
+    definition: "Earnings per share as printed when the report gives it as a percentage of the par value, e.g. 39%."
+
+  - id: par_value
+    display_name: Par value per share
+    expected_unit: ETB
+    definition: "Par (nominal) value of one ordinary share, e.g. 'ordinary shares of Birr 1,000 each'."
+
+  - id: net_operating_income
+    display_name: Net operating income
+    expected_unit: ETB
+    definition: "Total operating income after interest expense, as printed in the statement of profit or loss."

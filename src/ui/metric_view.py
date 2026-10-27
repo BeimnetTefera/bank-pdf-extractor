@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from decimal import Decimal
 
 import pandas as pd
 import streamlit as st
 
+from src.config_loader import MetricDefinition
 from src.models import AnalysisResult, Finding, MetricCandidate, MetricResult
 from src.pdf_extractor import NARRATIVE_METHOD, RawCandidate
 
@@ -19,24 +21,11 @@ STATUS_LABELS = {
 PERIOD_LABELS = {"current": "this year", "prior": "prior year", "other": "other year", "unknown": "year not identified"}
 SEVERITY_ICONS = {"error": ":material/error:", "warning": ":material/warning:", "info": ":material/info:"}
 _MARKDOWN_SPECIAL = set("\\`*_{}[]()#+-.!|<>~$")
-PHASE4 = "Saving review decisions arrives in Phase 4."
 
 
 def esc(text: str) -> str:
     """Escape Markdown so text from the PDF is shown literally."""
     return "".join(f"\\{ch}" if ch in _MARKDOWN_SPECIAL else ch for ch in text)
-
-
-def unit_label(mc: MetricCandidate | None) -> str:
-    if mc is None or mc.normalized.unit is None:
-        return "?"
-    if mc.normalized.unit == "fraction":
-        return "%"
-    if mc.normalized.unit == "count":
-        return "count"
-    return {Decimal(1_000): "ETB '000", Decimal(1_000_000): "ETB m", Decimal(1_000_000_000): "ETB bn"}.get(
-        mc.mapped.unit.scale, "ETB"
-    )
 
 
 def normalized_text(mc: MetricCandidate) -> str:
@@ -50,58 +39,136 @@ def normalized_text(mc: MetricCandidate) -> str:
     return f"= {n.value:,} ETB"
 
 
+PRINTED_SCALES = {Decimal(1): "Birr", Decimal(1_000): "Birr'000", Decimal(1_000_000): "Birr m",
+                  Decimal(1_000_000_000): "Birr bn"}
+
+
+def full_value_text(value: Decimal, unit: str | None) -> str:
+    """The value in the metric's unit, as approving records it: '189,512,266,000 ETB', '29%', '10,627'."""
+    if unit == "fraction":
+        return f"{(value * 100).normalize():f}%"
+    return f"{value:,} ETB" if unit == "ETB" else f"{value:,}"
+
+
+def printed_text(mc: MetricCandidate, expected_unit: str | None = None) -> str:
+    """The figure as printed with the printed unit: '189,512,266 Birr'000'. A count or a
+    percentage is shown as printed: a page's Birr heading does not apply to it."""
+    raw = mc.mapped.candidate.raw_value_text
+    if "count" in (expected_unit, mc.normalized.unit) or "fraction" in (expected_unit, mc.normalized.unit):
+        return raw
+    unit = mc.mapped.unit
+    if unit.currency not in (None, "ETB"):
+        return f"{raw} {unit.currency}" + ("" if unit.scale == 1 else f" × {unit.scale:,}")
+    if unit.currency is None and unit.scale == 1:
+        return raw
+    return f"{raw} {PRINTED_SCALES.get(unit.scale, f'Birr × {unit.scale:,}')}"
+
+
+def suggested_value_text(mc: MetricCandidate) -> str:
+    n = mc.normalized
+    return "not converted" if n.value is None else full_value_text(n.value, n.unit)
+
+
 # --- table -------------------------------------------------------------------------
 
-def metric_table(analysis: AnalysisResult, table_key: str) -> str | None:
-    """Show one row per metric; return the metric id of the selected row, if any."""
-    counts = {status: sum(m.status == status for m in analysis.metrics) for status in STATUS_LABELS}
+REVIEW_LABELS = {"approved": ("Approved", "green", "✅"), "corrected": ("Correction pending", "blue", "✏️"),
+                 "not_reported": ("Not reported", "violet", "⊘")}
+FILTER_ORDER = ("needs_review", "flagged", "corrected", "not_found", "approved", "not_reported")
+PENDING_ROW_STYLE = "background-color: rgba(37, 99, 235, 0.16); font-weight: 600"
+
+
+@dataclass(frozen=True)
+class ReviewDisplay:
+    """How a reviewed metric appears in the table (from its saved review state)."""
+
+    status: str  # "approved", "corrected" or "not_reported"
+    value_text: str  # the full value in the metric's unit, e.g. "1,234,567,000 ETB"
+    printed_text: str = ""  # the figure as printed, e.g. "1,234,567 Birr'000", or where the value came from
+
+
+def table_statuses(analysis: AnalysisResult, reviews: dict[str, ReviewDisplay]) -> dict[str, str]:
+    """metric id -> its status in the table: the review state when reviewed, else the extraction status."""
+    return {m.metric.id: reviews[m.metric.id].status if m.metric.id in reviews else m.status
+            for m in analysis.metrics}
+
+
+def metric_table(analysis: AnalysisResult, table_key: str,
+                 reviews: dict[str, ReviewDisplay] | None = None) -> tuple[str | None, list[str]]:
+    """One row per metric, under a status filter. Returns (the metric id of the selected row,
+    if any; the metric ids shown, in order)."""
+    reviews = reviews or {}
+    statuses = table_statuses(analysis, reviews)
+    counts = {s: list(statuses.values()).count(s) for s in FILTER_ORDER}
+    summary = f"{counts['approved']} approved · " if reviews else ""
     st.markdown(
-        f"**Extracted Metrics ({len(analysis.metrics)})** · "
+        f"**Extracted Metrics ({len(analysis.metrics)})** · {summary}"
         f"{counts['needs_review']} needs review · {counts['flagged']} flagged · {counts['not_found']} not found"
     )
-    rows = []
-    for m in analysis.metrics:
-        label, _, dot = STATUS_LABELS[m.status]
-        primary = m.primary
-        rows.append({
-            "Metric": m.metric.display_name,
-            "Value": primary.mapped.candidate.raw_value_text if primary else "—",
-            "Unit": unit_label(primary) if primary else "",
-            "Status": f"{dot} {label}",
-        })
+    labels = REVIEW_LABELS | STATUS_LABELS
+    chosen = st.pills("Show", list(FILTER_ORDER), selection_mode="multi", key="metric_status_filter",
+                      format_func=lambda s: f"{labels[s][0]} ({counts[s]})", label_visibility="collapsed",
+                      help="Show only metrics with these statuses. None chosen: all metrics.")
+    chosen = [s for s in FILTER_ORDER if s in (chosen or [])]
+    shown = [m for m in analysis.metrics if not chosen or statuses[m.metric.id] in chosen]
+    rows = [_table_row(m, statuses[m.metric.id], reviews.get(m.metric.id)) for m in shown]
+    frame = pd.DataFrame(rows, columns=["Metric", "Value", "As printed", "Status"])
+    pending = [statuses[m.metric.id] == "corrected" for m in shown]
+    styled = frame.style.apply(lambda row: [PENDING_ROW_STYLE if pending[row.name] else ""] * len(row), axis=1)
     event = st.dataframe(
-        pd.DataFrame(rows),
+        styled,
         hide_index=True,
         width="stretch",
-        height=620,
+        height=min(620, 38 + 35 * max(len(rows), 1)),
         on_select="rerun",
         selection_mode="single-row",
-        key=table_key,
+        key=f"{table_key}_{'_'.join(chosen)}",  # a new filter starts with no row selected
         column_config={
-            "Metric": st.column_config.TextColumn(width=150),
-            "Value": st.column_config.TextColumn(width=95),
-            "Unit": st.column_config.TextColumn(width=60),
+            "Metric": st.column_config.TextColumn(width=130),
+            "Value": st.column_config.TextColumn(width=130, help="The full value in the metric's unit: what "
+                                                 "approving records (and what Excel receives)."),
+            "As printed": st.column_config.TextColumn(width=110, help="The figure as printed in the report, with "
+                                                      "the printed unit. Approving converts it; do not correct it "
+                                                      "for the unit."),
             "Status": st.column_config.TextColumn(width=105),
         },
     )
+    if not shown:
+        st.caption("No metric has the chosen status.")
     picked = event.selection.rows if event is not None else []
-    return analysis.metrics[picked[0]].metric.id if picked and picked[0] < len(analysis.metrics) else None
+    ids = [m.metric.id for m in shown]
+    return (ids[picked[0]] if picked and picked[0] < len(ids) else None), ids
+
+
+def _table_row(m: MetricResult, status: str, reviewed: ReviewDisplay | None) -> dict[str, str]:
+    label, _, dot = (REVIEW_LABELS | STATUS_LABELS)[status]
+    primary = m.primary
+    if reviewed is not None:
+        value, printed = reviewed.value_text, reviewed.printed_text
+    elif primary is not None:
+        value, printed = suggested_value_text(primary), printed_text(primary, m.metric.expected_unit)
+    else:
+        value, printed = "—", ""
+    return {"Metric": m.metric.display_name, "Value": value, "As printed": printed, "Status": f"{dot} {label}"}
 
 
 # --- details -----------------------------------------------------------------------
 
-def metric_details(result: MetricResult, shown: MetricCandidate | None, on_view: Callable[[RawCandidate], None], on_show_page: Callable[[int], None]) -> None:
+def metric_details(result: MetricResult, shown: MetricCandidate | None, on_view: Callable[[RawCandidate], None],
+                   on_show_page: Callable[[int], None], review_label: tuple[str, str] | None = None,
+                   rejected_keys: frozenset = frozenset(), review_controls: Callable[[], None] | None = None) -> None:
+    """review_controls, if given, is drawn right after the figure's checks, before alternatives."""
     label, color, _ = STATUS_LABELS[result.status]
+    if review_label is not None:
+        label, color = review_label
     st.badge(label, color=color)
     st.markdown(f"#### {esc(result.metric.display_name)}")
 
     if shown is None:
         st.caption("No figure was found in this report. This is not the same as zero.")
         _findings(result.findings)
-        with st.expander("Definition"):
-            st.write(result.metric.definition)
-        st.button("Enter manually", icon=":material/edit:", disabled=True, width="stretch",
-                  help="Manual entry with a source page arrives with review saving (Phase 4–5).", key="manual_entry")
+        if review_controls is not None:
+            review_controls()
+        about_metric(result.metric)
         return
 
     c = shown.mapped.candidate
@@ -124,6 +191,8 @@ def metric_details(result: MetricResult, shown: MetricCandidate | None, on_view:
     own = [f for f in result.findings if shown.mapped.key in f.candidate_keys and f.rule_id != "CONFLICT"]
     metric_level = [f for f in result.findings if f.rule_id in ("CONFLICT", "NOT-FOUND")]
     _findings(own + metric_level)
+    if review_controls is not None:
+        review_controls()
 
     others = [mc for mc in result.candidates if mc is not shown]
     if others:
@@ -131,8 +200,9 @@ def metric_details(result: MetricResult, shown: MetricCandidate | None, on_view:
         for i, mc in enumerate(others[:12]):
             oc = mc.mapped.candidate
             kind = "sentence" if oc.extraction_method == NARRATIVE_METHOD else "table"
+            mark = " · ~~rejected~~" if mc.mapped.key in rejected_keys else ""
             text_col, button_col = st.columns([4, 1], vertical_alignment="center")
-            text_col.markdown(f"p{oc.page_index + 1} · `{oc.raw_value_text}` · {PERIOD_LABELS[mc.mapped.period]} · {kind}")
+            text_col.markdown(f"p{oc.page_index + 1} · `{oc.raw_value_text}` · {PERIOD_LABELS[mc.mapped.period]} · {kind}{mark}")
             button_col.button("", icon=":material/visibility:", key=f"view_alt_{i}", help="Show this candidate",
                               on_click=on_view, args=(oc,))
         if len(others) > 12:
@@ -140,16 +210,29 @@ def metric_details(result: MetricResult, shown: MetricCandidate | None, on_view:
 
     with st.expander("Surrounding text"):
         st.text(c.context_text)
-    with st.expander("Definition"):
-        st.write(result.metric.definition)
+    about_metric(result.metric)
 
     st.button("Show on page", icon=":material/description:", width="stretch",
               on_click=on_show_page, args=(c.page_index + 1,), key="show_on_page")
-    a, r, k = st.columns(3)
-    a.button("Approve", icon=":material/check:", type="primary", disabled=True, help=PHASE4, width="stretch")
-    r.button("Reject", icon=":material/close:", disabled=True, help=PHASE4, width="stretch")
-    k.button("Correct", icon=":material/edit:", disabled=True, width="stretch",
-             help="Enter the right value, unit and a reason; the extracted value is kept. Arrives with Phase 4.")
+
+
+UNIT_NAMES = {"ETB": "Birr (full amount, e.g. 1,234,567,000)", "count": "a count (e.g. branches)",
+              "fraction": "a percentage (saved as a fraction: 29% = 0.29)"}
+
+
+def about_metric(metric: MetricDefinition) -> None:
+    """What the metric means and where it goes: definition, unit, Excel column, formula and basis."""
+    with st.expander("About this metric", icon=":material/info:"):
+        st.markdown(esc(metric.definition))
+        _field("Unit", UNIT_NAMES.get(metric.expected_unit, metric.expected_unit))
+        _field("Excel column", metric.export_column or "none (shown on the Source Evidence sheet only)")
+        if metric.formula:
+            st.caption("Formula")
+            st.code(metric.formula, language=None, wrap_lines=True)
+        if metric.basis:
+            _field("Basis", metric.basis)
+        if metric.notes:
+            _field("Notes", metric.notes)
 
 
 def _findings(findings: list[Finding]) -> None:

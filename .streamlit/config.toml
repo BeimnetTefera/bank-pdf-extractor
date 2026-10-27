@@ -1,3 +1,13 @@
+[client]
+# Hide Streamlit's developer options (Rerun, Clear caches, Deploy) from the menu.
+# This also switches off the single-key "c" shortcut, which opened the Clear caches
+# dialog when someone typed while no input box had focus. In Streamlit 1.66 the
+# frontend only opens that dialog when developer options are shown, and "viewer"
+# turns them off. There is no setting for the "r" (rerun) shortcut; a rerun keeps
+# all entered data, like clicking any button. Developers can still get the full menu
+# with: streamlit run app.py --client.toolbarMode=developer
+toolbarMode = "viewer"
+
 [browser]
 # No telemetry (docs/security-and-privacy.md): Streamlit sends usage stats unless disabled.
 gatherUsageStats = false
@@ -5,6 +15,9 @@ gatherUsageStats = false
 [server]
 # Matches max_upload_mb in config/settings.yaml; the app also enforces that limit.
 maxUploadSize = 100
+# Fixed, so the Evidence links in exported Excel files (app_url in config/settings.yaml) keep
+# working: without it Streamlit moves to 8502 when 8501 is busy.
+port = 8501
 
 [theme]
 base = "light"

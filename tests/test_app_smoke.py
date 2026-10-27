@@ -47,11 +47,11 @@ def test_metric_table_lists_configured_metrics(monkeypatch):
     at = loaded_app(monkeypatch)
     assert not at.exception
     metrics, figures = at.dataframe[0].value, at.dataframe[1].value
-    assert list(metrics.columns) == ["Metric", "Value", "Unit", "Status"]
+    assert list(metrics.columns) == ["Metric", "Value", "As printed", "Status"]
     row = metrics[metrics["Metric"] == "Total assets"].iloc[0]
-    assert (row["Value"], row["Unit"]) == ("1,234,567", "ETB '000")
+    assert row["Value"].startswith("1,234,567,000") and row["As printed"].startswith("1,234,567")
     assert metrics[metrics["Metric"] == "Branches"].iloc[0]["Status"].endswith("Not found")
-    assert list(figures.columns) == ["Figure", "Value", "Page", "Type"]
+    assert list(figures.columns) == ["Figure", "Value", "Page", "Year", "Type"]
 
 
 def test_metric_details_show_source_and_conversion(monkeypatch):

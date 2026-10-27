@@ -16,10 +16,18 @@
 # A label or phrase that matches more than one metric is flagged for review; the app
 # never picks one silently.
 #
-# Source of the entries below: Bank of Abyssinia Annual Report 2025/26 (reviewed 2026-10-22).
-# Deliberately NOT mapped yet (see docs/decisions.md D-024): total deposits table lines,
-# total revenue/expense, non-performing loans, foreign assets, NBE bills, agents,
-# mobile banking users, cardholders, deposit account holders.
+# Table labels taught from the review screen ("Learn wording") are kept separately in
+# learned_aliases.yaml (decision D-043) and are used exactly like the aliases below.
+#
+# Wording can also be added or removed on the Templates page ("Wording" tab); the app then
+# edits only the line concerned and keeps every comment.
+#
+# Source of the entries below: Bank of Abyssinia Annual Report 2025/26 (reviewed 2026-10-22),
+# then BoA 2022/23 and 2024/25, Zemen, Oromia and Wegagen 2025/26 (reviewed 2026-10-26).
+# "Deposits from customers" is now mapped to total deposits (the user asked for it, replacing
+# D-024 for that line). Some banks print interest-free customer deposits on a separate line
+# (BoA 2024/25 and 2025/26, Oromia); that line is not added in, so check the total.
+# Still NOT mapped (D-024): total revenue/expense, non-performing loans, foreign assets.
 
 mappings:
   # --- statement table rows ------------------------------------------------
@@ -38,41 +46,88 @@ mappings:
   - metric_id: loans_and_advances_etb
     aliases:
       - "Loans , advances and financing to customers(Net)"      # BOA p111
-      - "Loans and advances to customers(Net)"                  # BOA p155
+      - "Loans and advances to customers(Net)"                  # BOA p155; BoA 2022/23 p46
+      - "Loans and advances to customers (net)"                 # Zemen 2025/26 p22
+      - "Loans, advances and financing to customers (Net)"      # same as BOA p111, spaced as BoA 2024/25 p44
+
+  - metric_id: total_deposits_etb
+    aliases:
+      - "Deposits from customers"                               # BoA 2022/23 p46; BOA 2025/26 p111; Oromia p50
+      - "Deposits from customers (Net)"                         # Zemen 2025/26 p22
+      - "Deposit from customers"                                # Wegagen 2025/26 p48; Oromia p111
+      - "Customer deposits"                                     # Zemen 2025/26 p51
+    text_before: ["deposits to Birr"]                           # BOA p36 "deposits to Birr 318.79 billion"
+
+  - metric_id: nbe_bills_etb
+    aliases:
+      - "NBE bills"                                             # wording of Zemen p56, BoA 2022/23 p94
+      - "NBE Bills (Treasury Bill)"                             # Zemen 2025/26 p58
+      - "Ethiopian Government bills"                            # BoA 2022/23 p102
 
   - metric_id: profit_before_tax_etb
     aliases: ["Profit before tax"]                              # BOA p110, p220
 
   - metric_id: profit_tax_etb
-    aliases: ["Income tax expense"]                             # BOA p110
+    aliases: ["Income tax expense"]                             # BOA p110; BoA 2022/23 p45; Wegagen p47
 
   - metric_id: profit_after_tax_etb
     aliases: ["Profit after tax"]                               # BOA p110
 
   - metric_id: eps_etb
     aliases: ["Earnings per share"]                             # BOA p110 (printed as %)
+    text_before:
+      - "earnings per share at"                                 # Zemen p3 "earnings per share at 53.9 percent"
+      - "earnings per share stood at"                           # Zemen p6 "Earnings per share stood at 53.9%"
+
+  - metric_id: weighted_average_shares
+    aliases: ["Weighted average number of ordinary shares in issue"]  # BoA 2022/23 p113; Zemen p63; Wegagen p121
 
   # --- sentences -------------------------------------------------------------
-  - metric_id: total_deposits_etb
-    text_before: ["deposits to Birr"]                           # BOA p36 "deposits to Birr 318.79 billion"
-
   - metric_id: branches
     text_after: ["branches"]                                    # BOA p49 "981 branches"
+    text_before: ["total number of branches"]                   # BoA 2022/23 p18 "bringing the total number of branches to 849"
 
   - metric_id: atms
     text_after: ["ATMs"]                                        # BOA p49 "1,761 ATMs"
+    text_before: ["number of ATMs"]                             # BoA 2022/23 p25 "the number of ATMs deployed has reached 1,277"
 
   - metric_id: pos_machines
     text_after: ["Point of Sale"]                               # BOA p49 "6,045 Point of Sale (PoS) terminals"
+    text_before: ["POS terminals"]                              # BoA 2022/23 p25 "POS terminals of 1,195"
+
+  - metric_id: agents
+    text_after: ["agents"]                                      # BoA 2022/23 p18 "increased to 15,003 agents"
 
   - metric_id: employees
     text_after: ["permanent employees", "employees"]            # BOA p62 "10,627 permanent employees"
+    text_before: ["total number of employees"]                  # BoA 2022/23 p25 "raising the total number of employees of the Bank to 11,508"
 
+  - metric_id: deposit_account_holders
+    text_before: ["number of deposit account holders"]          # BoA 2022/23 p18 "deposit account holders reached 10.3 million"
+
+  - metric_id: mobile_banking_users
+    text_after: ["mobile banking users"]                        # BoA 2022/23 p18 "2.76 million mobile banking users"
+
+  - metric_id: internet_banking_users
+    text_before: ["internet banking users"]                     # BoA 2022/23 p18 "internet banking users reached nearly 64,000"
+
+  - metric_id: cardholders
+    text_after: ["card holders"]                                # BoA 2022/23 p18 "2.94 million card holders"
+
+  # "percent" after a number in a sentence reads as % ("Return on Average Assets at 6.6 percent").
   - metric_id: roe_percent
-    text_before: ["Return on equity", "ROE"]                    # BOA p26, p44
+    text_before:
+      - "Return on equity"                                      # BOA p26
+      - "ROE"                                                   # BOA p44
+      - "Return on Average Equity"                              # Zemen p3 "Return on Average Equity at 37.8 percent"
+      - "ROAE"                                                  # Zemen p10; Wegagen p17
 
   - metric_id: roa_percent
-    text_before: ["RoA", "Return on assets"]                    # BOA p26
+    text_before:
+      - "RoA"                                                   # BOA p26
+      - "Return on assets"                                      # BOA p26
+      - "Return on Average Assets"                              # Zemen p3 "Return on Average Assets at 6.6 percent"
+      - "ROAA"                                                  # Zemen p10; Wegagen p17
 
   - metric_id: shareholders
     text_before: ["number of shareholders"]                     # BOA p49

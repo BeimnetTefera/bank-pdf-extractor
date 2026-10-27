@@ -1,8 +1,12 @@
+from decimal import Decimal
+
 from src.candidate_queries import (
+    NO_YEAR,
     candidate_key,
     display_label,
     filter_candidates,
     find_by_key,
+    page_of_rows,
     same_label_elsewhere,
     same_value_elsewhere,
 )
@@ -43,6 +47,37 @@ def test_filter_by_search_method_and_page():
     assert filter_candidates(items, method=TABLE_METHOD) == [table]
     assert filter_candidates(items, page_index=2) == [sentence]
     assert filter_candidates(items) == items
+
+
+def test_number_search_ignores_thousands_commas():
+    deposits = make(value="189,512,266")
+    other = make(row=1, value="(18,951,226)")
+    assert filter_candidates([deposits, other], search="189512266") == [deposits]
+    assert filter_candidates([deposits, other], search="189,512,266") == [deposits]
+    assert filter_candidates([deposits, other], search="18951") == [deposits, other]
+    assert filter_candidates([deposits, other], search="512 266") == [deposits]
+
+
+def test_filter_by_page_range_year_and_value():
+    a = make(page=0, value="1,000")
+    b = make(page=4, value="(2,500)", row=1)
+    c = make(page=9, value="-", row=2)
+    years = {id(a): 2026, id(b): 2025}
+    items = [a, b, c]
+    assert filter_candidates(items, pages=(3, 9)) == [b, c]
+    assert filter_candidates(items, year=2026, year_of=lambda x: years.get(id(x))) == [a]
+    assert filter_candidates(items, year=NO_YEAR, year_of=lambda x: years.get(id(x))) == [c]
+    assert filter_candidates(items, min_value=Decimal("0")) == [a]  # the dash has no number
+    assert filter_candidates(items, max_value=Decimal("0")) == [b]  # printed in brackets: negative
+    assert filter_candidates(items, min_value=Decimal("-3000"), max_value=Decimal("1000")) == [a, b]
+
+
+def test_page_of_rows_reports_the_true_count_of_pages():
+    rows = list(range(250))
+    assert page_of_rows(rows, 1, 100) == (list(range(100)), 3)
+    assert page_of_rows(rows, 3, 100) == (list(range(200, 250)), 3)
+    assert page_of_rows(rows, 9, 100)[0] == list(range(200, 250))  # past the end: the last page
+    assert page_of_rows([], 1, 100) == ([], 1)
 
 
 def test_display_label_for_sentence_shows_nearby_words():

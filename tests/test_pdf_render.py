@@ -1,7 +1,8 @@
 import pymupdf
 import pytest
 
-from src.pdf_render import _visible_area, focus_of, render_page_png
+from src.pdf_render import focus_of, render_page_png, screen_box_to_page
+from src.pdf_render import visible_area as _visible_area
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
@@ -52,6 +53,30 @@ def test_visible_area_stays_inside_the_page():
 
 def test_focus_of_returns_page_fractions():
     assert focus_of((290, 390, 310, 410), 600, 800) == (0.5, 0.5)
+
+
+def test_dragged_box_converts_to_page_points():
+    # Whole 600x800 page shown 300x400 pixels wide: every pixel is 2 points.
+    drag = {"x1": 150, "y1": 50, "x2": 200, "y2": 60, "width": 300, "height": 400}
+    assert screen_box_to_page(drag, (600, 800), 1.0, (0.5, 0.5)) == (300, 100, 400, 120)
+    # Zoomed 2x on the top-left quarter: the same drag covers half the distance.
+    assert screen_box_to_page(drag, (600, 800), 2.0, (0.0, 0.0)) == (150, 50, 200, 60)
+    # Dragged from bottom-right to top-left, and past the image edge: still a proper box.
+    reverse = {"x1": 200, "y1": 60, "x2": 350, "y2": 50, "width": 300, "height": 400}
+    assert screen_box_to_page(reverse, (600, 800), 1.0, (0.5, 0.5)) == (400, 100, 600, 120)
+
+
+def test_a_click_is_not_a_box():
+    assert screen_box_to_page({"x1": 10, "y1": 10, "x2": 11, "y2": 10, "width": 300, "height": 400},
+                              (600, 800), 1.0, (0.5, 0.5)) is None
+
+
+def test_several_coloured_boxes_are_drawn(simple_pdf):
+    plain = render_page_png(simple_pdf, 0)
+    boxed = render_page_png(simple_pdf, 0, boxes=(((300, 110, 360, 122), "focus", "Total assets"),
+                                                  ((400, 110, 450, 122), "recorded", "Not written"),
+                                                  ((50, 110, 120, 122), "marked")))
+    assert boxed != plain
 
 
 def test_zoom_below_whole_page_is_rejected(simple_pdf):

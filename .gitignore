@@ -28,3 +28,9 @@ data/*.db
 Thumbs.db
 .vscode/
 .idea/
+
+# Pilot starting data (D-087, user approved 2026-10-27): reviewed public reports for the hosted copy
+!seed/
+!seed/app.db
+!seed/uploads/
+!seed/uploads/*.pdf

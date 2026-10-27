@@ -6,6 +6,7 @@ Only navigation lives here; each screen is in src/ui/.
 import streamlit as st
 
 from src.config_loader import ConfigError, load_config
+from src.seed_data import restore_seed
 from src.ui import calculations, evidence_page, extract_review, pages, routes, sector_page
 
 # "expanded" rather than the default "auto": with "auto" the browser re-decides on window
@@ -23,6 +24,8 @@ except ConfigError as exc:
     st.error("The configuration could not be loaded. Fix the file below and reload the page.")
     st.code(str(exc), language="text")
     st.stop()
+
+restore_seed(config.settings.data_dir)  # hosted copy: reload the reviewed reports after a restart
 
 
 def home_page() -> None:
@@ -107,6 +110,6 @@ with st.sidebar:
     st.divider()
     st.session_state.reviewer = st.session_state.get("reviewer", config.settings.default_reviewer)
     st.text_input("Reviewer", key="reviewer", help="Saved with every review decision. No login in this prototype.")
-    st.caption("Local prototype · documents stay on this computer")
+    st.caption("Pilot version · use public annual reports only")
 
 navigation.run()

@@ -18,6 +18,8 @@ from src.project_service import list_documents
 from src.ui import routes
 from src.ui.export_panel import export_button
 
+TESTER_PROMPT = CONFIG_DIR.parent / "docs" / "tester-prompt.md"  # shown on Home for the Claude browser extension
+
 WORKFLOW = [
     ("Load a report", "Enter the bank and report year, then upload the annual report PDF.", "Available"),
     ("Check figures against the PDF", "Click a figure to see it boxed on its source page.", "Available"),
@@ -43,6 +45,11 @@ def home() -> None:
                 else:
                     st.badge(status, color="gray")
     st.caption("Start from **Extract & Review** in the menu.")
+    with st.expander("Let Claude do a first review for you", icon=":material/smart_toy:"):
+        st.markdown("Copy this prompt (button at the top right of the box) into the Claude browser extension "
+                    "while this app is open, and replace `<MY NAME>`. Claude records each decision as "
+                    "*Claude for your name*; check its work before you finish the report.")
+        st.code(TESTER_PROMPT.read_text(encoding="utf-8"), language="markdown", wrap_lines=True)
 
 
 def bank_reports(config: AppConfig, open_report: Callable[[str], str | None]) -> None:

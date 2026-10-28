@@ -24,6 +24,20 @@ def _forms(query: str) -> list[str]:
     return forms
 
 
+def value_beside(match: Box, numbers: list[tuple[Box, str]]) -> Box | None:
+    """The figure printed on the same line as matched words, to their right: the first column, so the
+    report year's. Note references such as "24" are passed over when a real amount is on the line."""
+    top, bottom = match[1], match[3]
+    centre = ((match[0] + match[2]) / 2, (top + bottom) / 2)
+    if any(b[0] <= centre[0] <= b[2] and b[1] <= centre[1] <= b[3] for b, _ in numbers):
+        return match  # the search was for the number itself
+    on_line = [(box, text) for box, text in numbers
+               if box[0] >= match[2] - 1 and min(bottom, box[3]) - max(top, box[1]) > 0.4 * (bottom - top)]
+    amounts = [(box, text) for box, text in on_line if "," in text or "." in text or len(text.strip("()-")) > 3]
+    chosen = amounts or on_line
+    return min(chosen, key=lambda item: item[0][0])[0] if chosen else None
+
+
 def find_in_report(pdf_bytes: bytes, query: str, ocr_words: dict[int, list[list]] | None = None) -> list[tuple[int, Box]]:
     """Each zero-based page that holds the query, once, with the box of its first match there."""
     forms = _forms(query)

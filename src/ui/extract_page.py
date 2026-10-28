@@ -258,6 +258,12 @@ def _find(sha256: str, query: str, _pdf_bytes: bytes, _ocr_words: dict) -> list[
     return page_search.find_in_report(_pdf_bytes, query, _ocr_words)
 
 
+def _figure_for(p: Prepared, page_index: int, box: tuple) -> tuple:
+    """Searching a label boxes the figure printed beside it; a searched number is boxed itself."""
+    numbers = [(c.bbox, c.raw_value_text) for c in p.extraction.candidates if c.page_index == page_index]
+    return page_search.value_beside(box, numbers) or box
+
+
 def _go_hit(page_index: int, box: tuple) -> None:
     st.session_state.viewer_page = page_index + 1
     st.session_state.ex_found = (page_index, box)
@@ -284,7 +290,7 @@ def _find_results(p: Prepared, page: int) -> None:
         for col, (page_index, box) in zip(cols[1:], shown):
             col.button(str(page_index + 1), key=f"ex_hit_{page_index}", width="stretch",
                        type="primary" if page_index == page - 1 else "secondary",
-                       on_click=_go_hit, args=(page_index, box))
+                       on_click=_go_hit, args=(page_index, _figure_for(p, page_index, box)))
         if len(hits) > len(shown):
             cols[-1].html(f'<span class="bpe-minor">and {len(hits) - len(shown)} more; type more words to narrow it'
                           '</span>')

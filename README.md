@@ -95,8 +95,8 @@ Prints page count, text availability and raw label/value rows with their PDF pag
 5. Your name (sidebar **Reviewer**) and the time are saved with every decision; extracted values are never overwritten.
 6. When the review is done, press **Finish extraction** (under the metric table). The figures are locked; **Reopen extraction** (under the metric table, or on the Calculations page) unlocks them, with a reason.
 7. On **Calculations**, the analyst sees the approved figures and enters the 26 calculated columns (ratios, averages, growth, "(Calculated)" values) with a note on the formula. Each column shows its draft formula, the **Auto value** the app works out from the approved figures, and the difference from the entered value (and from the printed figure for profit, EPS, ROA and ROE; ⚠ above 0.5%). **Use auto values for empty columns** records the auto values with their arithmetic. The formulas are drafts in `config/export_template.yaml` (`formulas`), listed for review in `docs/calculated-formulas-draft.md`.
-8. Reopen saved reports later from **Bank Reports**. Uploading a PDF that is already saved also reopens its review.
-9. To remove a saved report (a demo, or one saved twice), press the bin next to it on **Bank Reports**, give a reason and tick the confirmation. Everything of that report is deleted, including its stored PDF unless another copy uses it; the deletion is logged under **Deleted reports**. Export the year again to update its Excel file.
+8. Reopen saved reports later from **Reports** (the first item in the menu). Uploading a PDF that is already saved also reopens its review.
+9. To remove a saved report (a demo, or one saved twice), open its **⋯** menu on **Reports**, give a reason and tick the confirmation. Everything of that report is deleted, including its stored PDF unless another copy uses it; the deletion is logged under **Deleted reports**. Export the year again to update its Excel file.
 
 The **All Figures** tab lists every raw number in the PDF, including ones not matched to a metric.
 
@@ -132,9 +132,9 @@ Search for a number with or without commas (`189512266` finds `189,512,266`) or 
 
 **Fit width** and **Fit page** size the page to the panel; **Full screen** opens a larger view. Selecting a figure zooms to 200% around it, until you move the zoom slider yourself; from then on your zoom is kept. Use the sliders to move around a zoomed page (mouse-wheel zoom and drag-to-pan are not available: dragging is used for marking numbers).
 
-### Work left on Bank Reports
+### Work left on Reports
 
-Each saved report on **Bank Reports** shows **Work left (n)**: corrections and calculations waiting for approval and metrics not yet reviewed (sector metrics are not counted), each with an **Open** button that opens the report at that metric.
+Each saved report on **Reports** shows **Work left (n)**: corrections and calculations waiting for approval and metrics not yet reviewed (sector metrics are not counted), each with an **Open** button that opens the report at that metric.
 
 ### Marking the right number on the page
 
@@ -176,7 +176,7 @@ They use approved values where there are any, otherwise the suggested figures, a
 
 ## Evidence pages
 
-Every value has an **Evidence page** that shows why it is what it is: the value in full Birr and as printed, who approved it and when, the note in full, the PDF page with the box and a close-up of the line, the other figures found and why they were not used, and the full review history. Open it with **View evidence page** in Metric Details, or from the **Evidence summary** (link on each report in Bank Reports), which lists every metric of a report and offers a CSV and an evidence PDF to hand to someone else. **Open in viewer at this page** jumps back to Extract & Review at that figure.
+Every value has an **Evidence page** that shows why it is what it is: the value in full Birr and as printed, who approved it and when, the note in full, the PDF page with the box and a close-up of the line, the other figures found and why they were not used, and the full review history. Open it with **View evidence page** in Metric Details, or from the **Evidence summary** (in the **⋯** menu of each report on Reports), which lists every metric of a report and offers a CSV and an evidence PDF to hand to someone else. **Open in viewer at this page** jumps back to Extract & Review at that figure.
 
 In the Excel export every value cell links to its Evidence page and carries a comment with its source and note, and the **Evidence** sheet lists every metric with its status. The links use `app_url` in `config/settings.yaml` (default `http://localhost:8501`), so they open where the app is running.
 
@@ -212,7 +212,7 @@ Some reports are photographs or scans: their pages have no text layer, so nothin
 
 ## Exporting to Excel
 
-There is **one workbook per fiscal year**, holding every bank saved for that year: `approved_2025-26.xlsx`, `approved_2026-27.xlsx`, and so on. Press **Export 2025/26 to Excel (all banks)** under the metric table of a saved report, or pick the year on **Bank Reports**. The file is written to the `exports` folder in the data folder and offered for download; exporting the same year again replaces it with an up-to-date copy (close it in Excel first). A year typed as `2026` counts as `2025/26` (July 2025 to June 2026). It contains only approved values:
+There is **one workbook per fiscal year**, holding every bank saved for that year: `approved_2025-26.xlsx`, `approved_2026-27.xlsx`, and so on. Press **Export 2025/26 to Excel (all banks)** under the metric table of a saved report, or pick the year under **Export** on **Reports**. The file is written to the `exports` folder in the data folder and offered for download; exporting the same year again replaces it with an up-to-date copy (close it in Excel first). A year typed as `2026` counts as `2025/26` (July 2025 to June 2026). It contains only approved values:
 
 | Sheet | Contents |
 |---|---|

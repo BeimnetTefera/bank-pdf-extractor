@@ -66,6 +66,16 @@ def list_documents(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute("SELECT * FROM documents ORDER BY uploaded_at DESC").fetchall()
 
 
+def recent_decisions(conn: sqlite3.Connection, decisions: tuple[str, ...], limit: int = 5) -> list[sqlite3.Row]:
+    """The latest review decisions of the given kinds across all saved reports, newest first, with their report."""
+    marks = ", ".join("?" * len(decisions))
+    return conn.execute(
+        f"""SELECT r.decision, r.metric_id, r.reviewed_value, r.reviewed_unit, r.reviewer, r.created_at,
+                   d.id AS document_id, d.bank_name, d.reporting_period
+            FROM review_decisions r JOIN documents d ON d.id = r.document_id
+            WHERE r.decision IN ({marks}) ORDER BY r.id DESC LIMIT ?""", (*decisions, limit)).fetchall()
+
+
 def get_document(conn: sqlite3.Connection, document_id: str) -> sqlite3.Row | None:
     return conn.execute("SELECT * FROM documents WHERE id = ?", (document_id,)).fetchone()
 

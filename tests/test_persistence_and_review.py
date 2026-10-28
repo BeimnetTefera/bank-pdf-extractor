@@ -12,7 +12,13 @@ from src.config_loader import LabelMapping, load_config
 from src.database import connect
 from src.document_manager import store_document
 from src.pdf_extractor import EXTRACTOR_VERSION, extract_candidates
-from src.project_service import find_documents_by_hash, list_documents, load_candidates, save_analysis
+from src.project_service import (
+    find_documents_by_hash,
+    list_documents,
+    load_candidates,
+    recent_decisions,
+    save_analysis,
+)
 from src.review_service import ReviewError
 from tests.conftest import make_pdf
 
@@ -304,3 +310,13 @@ def test_only_approved_metrics_reach_approved_results(saved, conn):
     results = review.approved_results(conn, document.id)
     assert [r.metric_id for r in results] == ["total_assets_etb"]
     assert results[0].source_page == 1 and results[0].candidate.raw_value_text == "1,234,567"
+
+
+def test_recent_decisions_lists_the_latest_outcomes_with_their_report(saved, conn):
+    _, document, _, _ = saved
+    review.approve(conn, primary_id(saved, "total_assets_etb"), REVIEWER)
+    review.reject(conn, primary_id(saved, "total_equity_etb"), REVIEWER, "wrong column")
+    latest = recent_decisions(conn, ("approved", "rejected"))
+    assert [(r["decision"], r["metric_id"], r["document_id"]) for r in latest] == [
+        ("rejected", "total_equity_etb", document.id), ("approved", "total_assets_etb", document.id)]
+    assert recent_decisions(conn, ("reopened",)) == []

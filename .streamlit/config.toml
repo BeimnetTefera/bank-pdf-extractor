@@ -18,21 +18,57 @@ maxUploadSize = 100
 # Fixed, so the Evidence links in exported Excel files (app_url in config/settings.yaml) keep
 # working: without it Streamlit moves to 8502 when 8501 is busy.
 port = 8501
+# Serves static/ at app/static/: the IBM Plex font files of the theme (no font is fetched
+# from another site, docs/security-and-privacy.md).
+enableStaticServing = true
 
+# The redesign's look (D-090): cool grey ground, white panels with thin borders, one deep
+# blue for actions, IBM Plex Sans for text and IBM Plex Mono for numbers. Details that the
+# theme cannot set are in src/ui/style.py.
 [theme]
 base = "light"
-primaryColor = "#2563EB"
-backgroundColor = "#F8FAFC"
-secondaryBackgroundColor = "#FFFFFF"
-textColor = "#0F172A"
-borderColor = "#E2E8F0"
+primaryColor = "#2747C9"
+backgroundColor = "#F4F5F7"
+secondaryBackgroundColor = "#F9FAFB"
+textColor = "#15181E"
+linkColor = "#2747C9"
+borderColor = "#E3E6EB"
 baseRadius = "medium"
 showWidgetBorder = true
-font = "sans-serif"
+baseFontSize = 15
+font = "IBM Plex Sans, sans-serif"
+codeFont = "IBM Plex Mono, monospace"
+headingFontSizes = ["1.75rem", "1.5rem", "1.2rem", "1.05rem", "0.95rem", "0.9rem"]
+headingFontWeights = [600, 600, 600, 600, 600, 600]
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/ibm-plex-sans-latin-400-normal.woff2"
+weight = 400
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/ibm-plex-sans-latin-500-normal.woff2"
+weight = 500
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/ibm-plex-sans-latin-600-normal.woff2"
+weight = 600
+
+[[theme.fontFaces]]
+family = "IBM Plex Mono"
+url = "app/static/fonts/ibm-plex-mono-latin-400-normal.woff2"
+weight = 400
+
+[[theme.fontFaces]]
+family = "IBM Plex Mono"
+url = "app/static/fonts/ibm-plex-mono-latin-500-normal.woff2"
+weight = 500
 
 [theme.sidebar]
-backgroundColor = "#0F172A"
-secondaryBackgroundColor = "#1E293B"
-textColor = "#E2E8F0"
-primaryColor = "#3B82F6"
-borderColor = "#1E293B"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F9FAFB"
+textColor = "#4B5363"
+primaryColor = "#2747C9"
+borderColor = "#E3E6EB"

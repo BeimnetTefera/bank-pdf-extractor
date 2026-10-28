@@ -1,21 +1,26 @@
-"""Smaller screens: Home, Bank Reports, Templates (metric configuration) and Settings."""
+"""Smaller screens: Getting started, Reports (the home), Templates (metric configuration) and Settings."""
 
 from __future__ import annotations
 
 import json
+from collections import Counter
 from collections.abc import Callable
 from contextlib import closing
 from datetime import datetime, timezone
+from decimal import Decimal
+from html import escape
 
 import streamlit as st
 
 from src import bulk_review, ocr, report_corrections, report_merge, review_service
-from src.config_loader import CONFIG_DIR, AppConfig
+from src.analysis import report_end_year
+from src.config_loader import CONFIG_DIR, AppConfig, bank_key
 from src.database import connect
+from src.evidence import format_value
 from src.excel_exporter import fiscal_year_label, report_years
 from src.mapping_editor import KINDS, MappingEditError, add_wording, list_wording, remove_wording
-from src.project_service import list_documents
-from src.ui import routes
+from src.project_service import list_documents, recent_decisions
+from src.ui import routes, style
 from src.ui.export_panel import export_button
 
 TESTER_PROMPT = CONFIG_DIR.parent / "docs" / "tester-prompt.md"  # shown on Home for the Claude browser extension
@@ -52,50 +57,130 @@ def home() -> None:
         st.code(TESTER_PROMPT.read_text(encoding="utf-8"), language="markdown", wrap_lines=True)
 
 
-def bank_reports(config: AppConfig, open_report: Callable[[str], str | None]) -> None:
-    st.markdown("## Bank Reports")
-    st.caption(f"Reports saved on this computer, in {config.settings.data_dir}.")
+REPORT_COLUMNS = [2.9, 1.0, 1.8, 1.5, 1.6, 1.0, 0.6]  # bank, year, progress, work left, status, open, more
+
+
+def bank_reports(config: AppConfig, open_report: Callable[[str], str | None],
+                 new_report: Callable[[], None] | None = None) -> None:
+    """Reports, the home of the redesign (D-090): what is saved, how far each review is, what is left."""
     with closing(connect(config.settings.database_path)) as conn:
         documents = list_documents(conn)
         progress = {d["id"]: len(review_service.approved_results(conn, d["id"])) for d in documents}
         finished = {d["id"]: review_service.extraction_status(conn, d["id"]).finished for d in documents}
         work = {d["id"]: bulk_review.outstanding_work(conn, d["id"], config) for d in documents}
         years = report_years(conn)
+        activity = recent_decisions(conn, tuple(ACTIVITY_VERBS))
+    _reports_header(config, years, new_report)
     if not documents:
-        st.info("No reports saved yet. Upload a PDF in Extract & Review and press Save report.",
+        st.info("No reports saved yet. Press **New report**, upload a PDF and press Save report.",
                 icon=":material/inbox:")
         return
+    totals = {d["id"]: len(json.loads(d["metric_ids"])) for d in documents}
+    copies = Counter(d["sha256"] for d in documents)
+    ready = [d for d in documents if finished[d["id"]]]
+    waiting = [d for d in documents if work[d["id"]].count]
+    approved, total = sum(progress.values()), sum(totals.values())
+    style.stat_strip([
+        ("Saved reports", str(len(documents)),
+         f"{len({bank_key(d['bank_name']) for d in documents})} bank(s) · {len(years)} fiscal year(s)"),
+        ("Figures approved", f"{approved} / {total}", f"{round(100 * approved / total) if total else 0}% of all metrics"),
+        ("Waiting for review", str(sum(work[d["id"]].count for d in documents)), f"across {len(waiting)} report(s)"),
+        ("Ready for calculations", str(len(ready)),
+         ", ".join(f"{d['bank_name']} {_year(d)}" for d in ready) or "none yet"),
+    ])
     _fix_names_and_years(config)
     _duplicates(config)
-    if years:  # every saved report has a recognisable year (Save requires one)
-        with st.container(border=True):
-            st.markdown("**Export to Excel** · one workbook per fiscal year, with every bank saved for that year")
-            year_col, button_col = st.columns([1, 2])
-            end_year = year_col.selectbox("Fiscal year", years, format_func=fiscal_year_label, key="export_year",
-                                          label_visibility="collapsed")
-            with button_col:
-                export_button(config, end_year, key=f"export_{end_year}")
-    for d in documents:
-        total = len(json.loads(d["metric_ids"]))
-        with st.container(border=True):
-            info_col, progress_col, open_col, delete_col = st.columns([5, 3, 1, 1], vertical_alignment="center")
-            step = ":green[Extraction finished · ready for calculations]" if finished[d["id"]] else "In review"
-            info_col.markdown(
-                f"**{d['bank_name']} · {d['reporting_period']}** · {step}  \n"
-                f"{d['original_filename']} · {d['page_count']} pages · saved {d['uploaded_at'][:16].replace('T', ' ')} UTC"
-            )
-            progress_col.progress(progress[d["id"]] / total if total else 0.0,
-                                  text=f"{progress[d['id']]} of {total} metrics approved")
-            if open_col.button("Open", key=f"open_{d['id']}", type="primary", width="stretch"):
-                error = open_report(d["id"])
-                if error:
-                    st.error(error, icon=":material/error:")
-            with info_col:
-                routes.link("evidence_summary", "Evidence summary", ":material/table_view:", report=d["id"])
-            with delete_col:
-                _delete_report(config, d, progress[d["id"]])
-            _work_left(config, d["id"], work[d["id"]], open_report)
+    table_col, feed_col = st.columns([3.6, 1], gap="medium")
+    with table_col, st.container(key="panel_reports"):
+        with st.container(key="reports_head"):
+            head = st.columns(REPORT_COLUMNS, vertical_alignment="center")
+            for col, title in zip(head, ("Bank", "Year", "Progress", "Work left", "Status")):
+                col.markdown(title)
+        for d in documents:
+            _report_row(config, d, progress[d["id"]], totals[d["id"]], finished[d["id"]], copies[d["sha256"]] > 1,
+                        work[d["id"]], open_report)
+    with feed_col, st.container(key="panel_activity"):
+        _activity(config, activity)
     _deletion_log(config)
+
+
+def _reports_header(config: AppConfig, years: list[int], new_report: Callable[[], None] | None) -> None:
+    title_col, export_col, new_col = st.columns([6, 1.1, 1.3], vertical_alignment="bottom")
+    title_col.markdown("## Reports")
+    title_col.caption(f"Annual reports saved for review, newest first · stored in {config.settings.data_dir}")
+    if years:  # every saved report has a recognisable year (Save requires one)
+        with export_col.popover("Export", icon=":material/download:", width="stretch"):
+            st.markdown("**Export to Excel** · one workbook per fiscal year, with every bank saved for that year")
+            end_year = st.selectbox("Fiscal year", years, format_func=fiscal_year_label, key="export_year")
+            export_button(config, end_year, key=f"export_{end_year}")
+    if new_report is not None:
+        new_col.button("New report", icon=":material/add:", type="primary", width="stretch", on_click=new_report)
+
+
+def _report_row(config: AppConfig, d, approved: int, total: int, finished: bool, duplicate: bool,
+                work: bulk_review.OutstandingWork, open_report: Callable[[str], str | None]) -> None:
+    with st.container(key=f"report_row_{d['id']}"):
+        bank, year, progress, left, status, open_col, more_col = st.columns(REPORT_COLUMNS, vertical_alignment="center")
+        bank.markdown(f"**{d['bank_name']}**")
+        bank.html(f'<div class="bpe-file">{escape(d["original_filename"])} · {d["page_count"]} pages</div>')
+        year.html(f'<span class="bpe-num">{escape(_year(d))}</span>')
+        progress.progress(approved / total if total else 0.0, text=f"{approved} of {total} approved")
+        left.caption(_work_text(config, work))
+        if finished:
+            status.badge("Finished", color="green", icon=":material/task_alt:")
+        elif duplicate:
+            status.badge("Duplicate", color="gray", icon=":material/content_copy:")
+        else:
+            status.badge("In review", color="orange")
+        if open_col.button("Open", key=f"open_{d['id']}", type="primary", width="stretch"):
+            error = open_report(d["id"])
+            if error:
+                st.error(error, icon=":material/error:")
+        with more_col:
+            _delete_report(config, d, approved)
+        _work_left(config, d["id"], work, open_report)
+
+
+def _work_text(config: AppConfig, work: bulk_review.OutstandingWork) -> str:
+    """Work left in a few words: the metric names when there are one or two."""
+    if not work.count:
+        return "None"
+    names = {m.id: m.display_name for m in config.metrics}
+    metric_ids = [*work.corrections, *work.calculations, *work.not_reviewed]
+    return ", ".join(names.get(m, m) for m in metric_ids) if work.count <= 2 else f"{work.count} metrics"
+
+
+def _activity(config: AppConfig, decisions) -> None:
+    st.markdown("**Recent activity**")
+    if not decisions:
+        st.caption("No review decisions yet.")
+        return
+    names = {m.id: m.display_name for m in config.metrics}
+    events = []
+    for r in decisions:
+        what = ACTIVITY_VERBS.get(r["decision"], r["decision"].replace("_", " "))
+        value = (f" · {format_value(Decimal(r['reviewed_value']), r['reviewed_unit'])}"
+                 if r["reviewed_value"] is not None and r["decision"] == "approved" else "")
+        events.append(
+            f'<div class="bpe-event"><span class="bpe-avatar">{escape(style.initials(r["reviewer"]))}</span><span>'
+            f'<b>{escape(r["reviewer"])}</b> {what} <b>{escape(names.get(r["metric_id"], r["metric_id"]))}</b>'
+            f'{escape(value)}<br><span class="bpe-when">{escape(r["bank_name"])} {escape(_year(r))} · '
+            f'{escape(_short_time(r["created_at"]))}</span></span></div>')
+    st.html("".join(events))
+
+
+ACTIVITY_VERBS = {"approved": "approved", "rejected": "rejected", "reopened": "reopened"}
+
+
+def _short_time(iso: str) -> str:
+    """'2026-10-26T07:52:03+00:00' -> '26 Oct, 07:52 UTC'."""
+    when = datetime.fromisoformat(iso)
+    return f"{when.day} {when:%b}, {when:%H:%M} UTC"
+
+
+def _year(d) -> str:
+    end_year = report_end_year(d["reporting_period"])
+    return fiscal_year_label(end_year) if end_year else d["reporting_period"]
 
 
 def _reviewer() -> str:
@@ -109,8 +194,9 @@ def _fix_names_and_years(config: AppConfig) -> None:
         found = report_corrections.proposed_fixes(conn, config.banks)
     if not found:
         return
-    with st.container(border=True):
-        st.markdown("**Fix names and years** · each fix is logged with your name; nothing changes until you press Apply")
+    count = len(found.fixes) + len(found.unmatched_banks) + len(found.unreadable_years)
+    with st.expander(f"Fix names and years · {count} to check", icon=":material/edit_note:"):
+        st.caption("Each fix is logged with your name; nothing changes until you press Apply.")
         if found.fixes:
             for fix in found.fixes:
                 st.markdown(f"{report_corrections.FIELDS[fix.field]} of {fix.label}: "
@@ -177,9 +263,9 @@ def _duplicate_group(config: AppConfig, conn, group: report_merge.DuplicateGroup
         return ", ".join(names.get(m, m) for m in metric_ids)
 
     ids = [d["id"] for d in group.documents]
-    with st.container(border=True):
-        st.warning(f"**Same PDF saved {len(ids)} times** · {group.documents[0]['original_filename']}",
-                   icon=":material/content_copy:")
+    st.warning(f"**Same PDF saved {len(ids)} times** · {group.documents[0]['original_filename']}. Merging keeps "
+               "the copy with more decisions.", icon=":material/content_copy:")
+    with st.expander("Review duplicates", icon=":material/merge:"):
         keep = st.radio("Copy to keep", ids, index=ids.index(group.default_keep), format_func=label,
                         key=f"merge_keep_{group.sha256}")
         others = [i for i in ids if i != keep]
@@ -243,7 +329,9 @@ def _work_left(config: AppConfig, document_id: str, work: bulk_review.Outstandin
 
 def _delete_report(config: AppConfig, d, approved: int) -> None:
     """Delete one saved report, after a reason and an explicit confirmation (decision D-049)."""
-    with st.popover("", icon=":material/delete:", help="Delete this saved report", width="stretch"):
+    with st.popover("", icon=":material/more_horiz:", help="Evidence summary, delete", width="stretch"):
+        routes.link("evidence_summary", "Evidence summary", ":material/table_view:", report=d["id"])
+        st.divider()
         st.markdown(f"**Delete {d['bank_name']} · {d['reporting_period']}?**")
         st.markdown(f"This permanently removes its figures, checks, every review decision ({approved} approved "
                     "value(s)) and calculated values, and the stored PDF unless another saved copy uses it. "

@@ -67,7 +67,8 @@ from src.review_service import ReviewError, ReviewState
 from src.sector_data import without_sector_metrics
 from src.calculated_entries import number_text, record_input_figure, saved_calculation
 from src.evidence import NoteCalculation, PdfWords, typed_calculation
-from src.ui import calc_panel, export_panel, metric_view, review_panel
+from src.excel_exporter import fiscal_year_label
+from src.ui import calc_panel, export_panel, metric_view, review_panel, style
 from src.ui.review_panel import ReviewContext
 from src.unit_normalizer import Normalized
 
@@ -112,10 +113,16 @@ def _render(sha256: str, page_index: int, highlight: tuple | None, zoom: float, 
 
 
 def render(config: AppConfig, open_calculations: Callable[[str], None] | None = None) -> None:
-    st.markdown("## Extract & Review")
-    st.caption("Review the extracted figures, check each against its source page, and approve the final values.")
-
+    style.wide_page()  # the review needs the whole width: queue, page and decision side by side (D-091)
+    title_slot, progress_slot, tools_slot = st.columns([5, 2.2, 1.6], vertical_alignment="bottom")
     doc = _document_bar(config)
+    saved = bool(doc and doc.get("document_id"))
+    with title_slot:
+        if saved:
+            st.markdown(f"## {metric_view.esc(st.session_state.bank or '')} · {_report_year_label()}")
+        else:
+            st.markdown("## Extract & Review")
+            st.caption("Review the extracted figures, check each against its source page, and approve the final values.")
     if doc is None:
         st.info(
             "Upload an annual report to start. The PDF is read on this computer only and is not "
@@ -123,10 +130,12 @@ def render(config: AppConfig, open_calculations: Callable[[str], None] | None = 
         )
         return
 
-    ocr_words, engine = _ocr_step(config, doc)
+    ocr_words, engine = _ocr_step(config, doc, tools_slot)
     with st.spinner("Reading the PDF (first time only)..."):
         extraction = _extract(doc["sha"], tuple(sorted(ocr_words)), doc["bytes"], ocr_words,
                               engine.version if engine else "")
+    if saved:
+        title_slot.caption(f"{doc['name']} · {extraction.page_count} pages")
     metric_ids = tuple(st.session_state.metric_selection)
     fingerprint = hashlib.sha256(repr((config.metrics, config.mappings, config.learned_aliases)).encode()).hexdigest()
     analysis = _analyse(doc["sha"], st.session_state.period, st.session_state.bank or "", metric_ids, fingerprint,
@@ -138,6 +147,10 @@ def render(config: AppConfig, open_calculations: Callable[[str], None] | None = 
     _reopened_notice(config, doc, analysis, extraction)
 
     ctx, states = _review_context(config, doc, analysis, extraction)
+    if ctx is not None:
+        approved = sum(s.status in ("approved", "not_reported") for s in states.values())
+        progress_slot.progress(approved / len(states) if states else 0.0,
+                               text=f"{approved} of {len(states)} approved or not reported")
     marked_values = _marked_values(states)
     calc_boxes = _calculation_boxes(ctx, states)
     if ctx is not None:
@@ -159,11 +172,12 @@ def render(config: AppConfig, open_calculations: Callable[[str], None] | None = 
         check_results = cross_checks.run_checks(conn, config.checks, analysis, states,
                                                 ctx.candidate_ids if ctx else {}, st.session_state.bank or "",
                                                 st.session_state.period or "")
-    viewer_col, table_col, detail_col = st.columns([9, 10, 6], gap="small")
+    # The queue of metrics, the page, the decision: left to right, as in the redesign (D-091).
+    table_col, viewer_col, detail_col = st.columns([8, 11, 7], gap="small")
     # Fill the table first so a newly selected row moves the viewer in the same run.
     with table_col:
-        _middle_panel(config, extraction, analysis, doc, _review_displays(analysis, ctx, states), ctx,
-                      open_calculations, marked_values, check_results)
+        shown_ids = _middle_panel(config, extraction, analysis, doc, _review_displays(analysis, ctx, states), ctx,
+                                  open_calculations, marked_values, check_results)
     selected = find_by_key(extraction.candidates, st.session_state.get("selected_key"))
     recorded = _recorded_boxes(ctx, analysis, states)
     for calculated in (ctx.note_calcs if ctx is not None else {}):
@@ -181,12 +195,19 @@ def render(config: AppConfig, open_calculations: Callable[[str], None] | None = 
         _pdf_viewer(doc, extraction, selected, recorded, focus_metric, ocr_words, analysis, ctx, store,
                     calc_boxes.get(focus_metric, []))
     with detail_col:
+        _metric_steps(shown_ids, analysis, extraction, marked_values, ctx)  # always in view, above the decision
         _details_panel(extraction, analysis, selected, ctx, states, store)
+
+
+def _report_year_label() -> str:
+    """The report year as YYYY/YY ("2025" reads as 2024/25), or as typed when it cannot be read."""
+    end_year = report_end_year(st.session_state.period or "")
+    return fiscal_year_label(end_year) if end_year else (st.session_state.period or "")
 
 
 # --- OCR for picture pages -------------------------------------------------------------
 
-def _ocr_step(config: AppConfig, doc: dict) -> tuple[ocr.OcrWords, ocr.OcrEngine | None]:
+def _ocr_step(config: AppConfig, doc: dict, tools_slot) -> tuple[ocr.OcrWords, ocr.OcrEngine | None]:
     """OCR words already read for this PDF; offers to read the rest. Sets st.session_state.ocr_missing."""
     needed = _pages_needing_ocr(doc["sha"], doc["bytes"])
     tesseract_dir = config.settings.tesseract_dir
@@ -195,8 +216,9 @@ def _ocr_step(config: AppConfig, doc: dict) -> tuple[ocr.OcrWords, ocr.OcrEngine
     words = {p: w for p, w in ocr.load_cache(path).items() if p in needed}
     missing = [p for p in needed if p not in words]
     st.session_state.ocr_missing = len(missing)
-    if doc.get("document_id"):  # a saved report keeps OCR in its Report tools menu
-        _report_tools(doc, needed, missing, engine, path)
+    if doc.get("document_id"):  # a saved report keeps OCR in its Report tools menu, in the header
+        with tools_slot:
+            _report_tools(doc, needed, missing, engine, path)
         return words, engine
     if not missing:
         return words, engine
@@ -241,7 +263,7 @@ def picture_pages_summary(needed: list[int], missing: list[int]) -> str:
 def _report_tools(doc: dict, needed: list[int], missing: list[int], engine: ocr.OcrEngine | None, path: Path) -> None:
     """Report tools menu of a saved report: OCR for picture pages stays available after saving."""
     label = f"Report tools · {len(missing)} picture page(s) not read" if missing else "Report tools"
-    with st.popover(label, icon=":material/build:"):
+    with st.popover(label, icon=":material/build:", width="stretch"):
         st.markdown(picture_pages_summary(needed, missing))
         if not missing:
             return
@@ -413,10 +435,11 @@ def _new_figures_prompt(ctx: ReviewContext, new: NewFigures, analysis: AnalysisR
         return
     names = {m.metric.id: m.metric.display_name for m in analysis.metrics}
     metrics = ", ".join(sorted({names.get(metric_id, metric_id) for metric_id, _, _ in new.candidates}))
-    with st.container(border=True):
-        st.markdown(f":material/sync_problem: **{len(new.candidates)} figure(s) found with the current wording are "
-                    f"not part of this saved report** ({metrics}). They can be viewed, but approved only once added. "
-                    "Adding them changes nothing already saved or reviewed.")
+    with st.expander(f"{len(new.candidates)} figure(s) found with the current wording are not in this saved report",
+                     icon=":material/sync_problem:"):
+        st.markdown(f"**{len(new.candidates)} figure(s) found with the current wording are not part of this saved "
+                    f"report** ({metrics}). They can be viewed, but approved only once added. Adding them changes "
+                    "nothing already saved or reviewed.")
         if ctx.extraction_finished:
             st.caption("The extraction review is finished. Reopen it to add them.")
         elif not review_service.same_text_reader(saved_version, extraction.extractor_version):
@@ -613,7 +636,10 @@ def _document_bar(config: AppConfig) -> dict | None:
     locked = "Saved with the report; open a new upload to change it." if saved else None
     period_help = locked or _suggest_period(doc)
 
-    with st.container(border=True):
+    # Once saved, the fields are locked: they fold away under the report's title (D-091).
+    frame = (st.expander("Report details · bank, year, metrics, PDF", icon=":material/description:") if saved
+             else st.container(border=True))
+    with frame:
         bank_col, period_col, metrics_col, status_col, file_col = st.columns([3, 2, 2, 2, 3], vertical_alignment="bottom")
         if saved:  # shown as saved, even if it was typed before the bank list existed
             bank_col.text_input("Bank", key="bank", disabled=True, help=locked)
@@ -803,14 +829,19 @@ def _metric_steps(shown_ids: list[str], analysis: AnalysisResult, extraction: Ex
     current = st.session_state.get("selected_metric")
     at = shown_ids.index(current) if current in shown_ids else -1
     args = (analysis, extraction, marked_values, ctx)
-    prev_col, where_col, next_col = st.columns([1, 2, 1], vertical_alignment="center")
-    prev_col.button("Previous", icon=":material/arrow_upward:", key="metric_prev", width="stretch",
-                    disabled=at <= 0, on_click=_step_to, args=(shown_ids[max(at - 1, 0)], *args),
-                    shortcut=PREVIOUS_SHORTCUT)
-    next_col.button("Next", icon=":material/arrow_downward:", key="metric_next", width="stretch",
-                    disabled=at >= len(shown_ids) - 1, on_click=_step_to,
-                    args=(shown_ids[min(at + 1, len(shown_ids) - 1)], *args), shortcut=NEXT_SHORTCUT)
-    where_col.caption(f"Metric {at + 1} of {len(shown_ids)}" if at >= 0 else f"{len(shown_ids)} metrics shown")
+    following = shown_ids[min(at + 1, len(shown_ids) - 1)]
+    names = {m.metric.id: m.metric.display_name for m in analysis.metrics}
+    with st.container(key="metric_steps"):
+        st.caption(f"Metric {at + 1} of {len(shown_ids)}" if at >= 0 else f"{len(shown_ids)} metrics shown")
+        prev_col, next_col = st.columns([1, 4], vertical_alignment="center")
+        prev_col.button("", icon=":material/arrow_upward:", key="metric_prev", width="stretch",
+                        help=f"Previous metric ({PREVIOUS_SHORTCUT})",
+                        disabled=at <= 0, on_click=_step_to, args=(shown_ids[max(at - 1, 0)], *args),
+                        shortcut=PREVIOUS_SHORTCUT)
+        next_col.button(f"Next: {names.get(following, following)}" if at >= 0 else "Start with the first",
+                        icon=":material/arrow_downward:", key="metric_next", width="stretch",
+                        disabled=at >= len(shown_ids) - 1, on_click=_step_to, args=(following, *args),
+                        shortcut=NEXT_SHORTCUT)
 
 
 def _approve_all_verified(ctx: ReviewContext, analysis: AnalysisResult) -> None:
@@ -851,7 +882,8 @@ def _middle_panel(config: AppConfig, extraction: ExtractionResult, analysis: Ana
                   reviews: dict[str, metric_view.ReviewDisplay], ctx: ReviewContext | None,
                   open_calculations: Callable[[str], None] | None,
                   marked_values: dict[str, tuple[int, tuple]],
-                  check_results: list[cross_checks.CheckResult]) -> None:
+                  check_results: list[cross_checks.CheckResult]) -> list[str]:
+    """The metric table and its tools; returns the metric ids it shows, for Previous / Next."""
     sha = doc["sha"]
     with st.container(border=True):
         metrics_tab, figures_tab, log_tab = st.tabs(["Extracted Data", "All Figures", "Validation Log"])
@@ -861,7 +893,6 @@ def _middle_panel(config: AppConfig, extraction: ExtractionResult, analysis: Ana
             metric_id, shown_ids = metric_view.metric_table(analysis, table_key, reviews)
             if _is_new_pick("metrics", metric_id):
                 _select_metric(metric_id, analysis, extraction, marked_values, ctx)
-            _metric_steps(shown_ids, analysis, extraction, marked_values, ctx)
             if bulk_message := st.session_state.pop("bulk_message", None):
                 st.success(bulk_message, icon=":material/done_all:")
             for skipped in st.session_state.pop("bulk_skipped", []):
@@ -883,6 +914,7 @@ def _middle_panel(config: AppConfig, extraction: ExtractionResult, analysis: Ana
                 _show_candidate(candidate, extraction)
         with log_tab:
             metric_view.validation_log(analysis, extraction.messages, report_end_year(st.session_state.period) is not None)
+    return shown_ids
 
 
 CHECK_ICONS = {"pass": ":green[:material/check_circle:]", "fail": ":red[:material/cancel:]",
@@ -1136,22 +1168,20 @@ def _pdf_viewer(doc: dict, extraction: ExtractionResult, selected: RawCandidate 
     page = st.session_state.viewer_page
     on_this_page = selected is not None and selected.page_index == page - 1
 
-    with st.container(border=True):
-        st.markdown("**PDF Viewer**")
-        st.caption(doc["name"])
-        prev_col, page_col, next_col, zoom_col = st.columns([1, 2, 1, 4], vertical_alignment="center")
+    with st.container(border=True):  # one toolbar row: page, zoom, full screen (the file name is in the header)
+        prev_col, page_col, next_col, zoom_col, full_col = st.columns([1, 1.7, 1, 4, 1], vertical_alignment="center")
         prev_col.button("", icon=":material/chevron_left:", on_click=_go_to, args=(page - 1,), disabled=page <= 1, key="prev_page")
         page_col.number_input("Page", min_value=1, max_value=page_count, key="viewer_page", label_visibility="collapsed")
         next_col.button("", icon=":material/chevron_right:", on_click=_go_to, args=(page + 1,), disabled=page >= page_count, key="next_page")
         zoom_label = zoom_col.select_slider("Zoom", options=list(ZOOM_LEVELS), key="viewer_zoom",
                                             label_visibility="collapsed", on_change=_zoom_chosen)
         view_zoom = ZOOM_LEVELS[zoom_label]
-        fit_col, full_col = st.columns([3, 2], vertical_alignment="center")
+        full_screen = full_col.button("", icon=":material/fullscreen:", key="viewer_full_screen", width="stretch",
+                                      help="Full screen: show this page large, in a window over the app")
+        fit_col, mark_col = st.columns([3, 2], vertical_alignment="center")
         fit = fit_col.radio("Fit", [FIT_WIDTH, FIT_PAGE], key="viewer_fit", horizontal=True,
                             label_visibility="collapsed",
                             help="Fit width: the page fills the panel width (scroll down). Fit page: all of it shows.")
-        full_screen = full_col.button("Full screen", icon=":material/fullscreen:", key="viewer_full_screen",
-                                      width="stretch", help="Show this page large, in a window over the app")
 
         if view_zoom > 1:
             x_col, y_col, centre_col = st.columns([3, 3, 2], vertical_alignment="bottom")
@@ -1162,9 +1192,6 @@ def _pdf_viewer(doc: dict, extraction: ExtractionResult, selected: RawCandidate 
                 on_click=_centre_on, args=(selected, extraction), disabled=not on_this_page,
                 help="Centre the view on the selected figure", width="stretch",
             )
-        caption_col, mark_col = st.columns([3, 2], vertical_alignment="center")
-        caption_col.caption(f"Page {page} of {page_count} · zoom {zoom_label} · :red[■] suggestion · "
-                            ":blue[■] selected · :green[■] calculation input · thin: other recorded")
         if st.session_state.pop("turn_on_marking", False):  # asked for by Calculate (Mark it)
             st.session_state.mark_mode = True
         _calc_input_banner()
@@ -1172,6 +1199,8 @@ def _pdf_viewer(doc: dict, extraction: ExtractionResult, selected: RawCandidate 
                                   help="Drag a box around the right number on the page. Correct and Enter manually "
                                        "then use it, and it is saved as the evidence for that value.")
 
+        st.caption(f"Page {page} of {page_count} · :red[■] suggestion · :blue[■] selected · "
+                   ":green[■] calculation input · thin: other recorded")
         thumbs_col, page_view_col = st.columns([1, 5])
         with thumbs_col:
             for p in range(max(1, page - 1), min(page_count, page + 1) + 1):

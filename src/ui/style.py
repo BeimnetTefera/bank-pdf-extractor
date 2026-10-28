@@ -50,6 +50,10 @@ CSS = """
 .bpe-file { font-size: 12px; color: #5F6775; overflow-wrap: anywhere; }
 .bpe-num { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; }
 
+/* review screen (D-091): a larger Approve, Previous / Next set off under the decision */
+[class*="st-key-approve_"] button { min-height: 44px; font-size: 15px; }
+.st-key-metric_steps { background: #FFFFFF; border: 1px solid #E3E6EB; border-radius: 8px; padding: 8px 12px; gap: 4px; }
+
 /* activity feed */
 .bpe-event { display: flex; gap: 10px; font-size: 13px; color: #4B5363; padding: 6px 0; }
 .bpe-event b { color: #15181E; font-weight: 500; }
@@ -66,6 +70,14 @@ LOGO, LOGO_ICON = STATIC / "logo.svg", STATIC / "logo-icon.svg"
 def apply() -> None:
     """Add the redesign's CSS to the page; call once per run, before anything is drawn."""
     st.html(CSS)
+
+
+WIDE = "<style>.stMainBlockContainer { max-width: none; padding-left: 1.5rem; padding-right: 1.5rem; }</style>"
+
+
+def wide_page() -> None:
+    """Let this page use the whole window width (the review screen's three panes)."""
+    st.html(WIDE)
 
 
 def brand() -> None:

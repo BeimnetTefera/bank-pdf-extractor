@@ -485,9 +485,14 @@ def test_a_value_worked_out_in_its_note_shows_its_inputs_not_the_marked_box(app)
     app.session_state["selected_metric"] = "employees"
     app.run()
     assert not app.exception
-    assert any("**Calculated**" in m.value for m in app.markdown)
+    assert any("is calculated" in m.value for m in app.markdown)  # close-ups of its inputs above the PDF
+    assert [b.label for b in app.button if b.label.startswith("Open page")] == ["Open page 1"]  # both on page 1
+    assert any("**CALCULATED**" in m.value for m in app.markdown)
     assert any("Gives the saved 2222221" in m.value for m in app.markdown)
-    assert len([b for b in app.button if b.label == "Show"]) == 2  # one per input, each boxed in green
+    inputs = next(d.value for d in app.dataframe if "Input" in d.value.columns)
+    # named by their printed row and year column, as the note does not name them
+    assert list(inputs["Input"]) == ["Total assets 2026", "Total assets 2025"]
+    assert list(inputs["Page"]) == ["p1", "p1"]
     assert not [b for b in app.button if b.label == "Show the marked box"]  # that box is only one input
     assert not any("No figure found" in w.value for w in app.warning)
     assert any("calculated by the reviewer" in s.value for s in app.success)

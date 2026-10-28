@@ -93,6 +93,27 @@ def render_crop_png(pdf_bytes: bytes, page_index: int, box: Box, margin: float =
         return page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), clip=clip).tobytes("png")
 
 
+def render_band_png(pdf_bytes: bytes, page_index: int, boxes: tuple[tuple[Box, str], ...], kind: str = "input",
+                    margin: float = 16.0, scale: float = 2.5) -> bytes:
+    """A close-up of the lines holding boxes: the full page width, from the highest box to the lowest
+    with margin points around, each (box, label) drawn and named in the style of kind. Shows the
+    inputs of a calculation on one page together, with their printed row labels."""
+    with pymupdf.open(stream=pdf_bytes, filetype="pdf") as doc:
+        if not 0 <= page_index < doc.page_count:
+            raise ValueError(f"Page index {page_index} is outside this PDF (0 to {doc.page_count - 1}).")
+        page = doc[page_index]
+        style = BOX_STYLES[kind]
+        p = style.padding
+        for (x0, y0, x1, y1), label in boxes:
+            page.draw_rect(pymupdf.Rect(x0 - p, y0 - p, x1 + p, y1 + p), color=style.color, width=style.width,
+                           fill=style.color if style.fill else None, fill_opacity=0.15 if style.fill else 1)
+            if style.labelled and label:
+                page.insert_text((x0 - p, y0 - p - 1.5), label, fontsize=LABEL_FONT_SIZE, color=style.color)
+        top, bottom = min(b[1] for b, _ in boxes), max(b[3] for b, _ in boxes)
+        clip = pymupdf.Rect(page.rect.x0, top - margin, page.rect.x1, bottom + margin) & page.rect
+        return page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), clip=clip).tobytes("png")
+
+
 def focus_of(bbox: Box, page_width: float, page_height: float) -> tuple[float, float]:
     """Centre of a box as fractions of the page size, for use as render focus."""
     x0, y0, x1, y1 = bbox

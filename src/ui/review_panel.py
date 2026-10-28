@@ -13,13 +13,14 @@ from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 from src import calculated_entries, external_sources, page_marks, par_value, value_input
 from src import review_service as review
 from src.config_loader import AppConfig
 from src.unit_normalizer import unit_label
-from src.ui import routes, source_form
+from src.ui import metric_view, routes, source_form
 from src.candidate_queries import CandidateKey
 from src.database import connect
 from src.evidence import NoteCalculation
@@ -499,22 +500,19 @@ def _note_calc_card(ctx: ReviewContext, calc: NoteCalculation, key: str) -> None
     (boxed in green on the page) with a button to show it. Replaces Show the marked box, whose box
     holds only one of the inputs."""
     with st.container(border=True):
-        st.markdown(":material/calculate: **Calculated** · from the arithmetic in the note")
+        st.markdown(":green[**CALCULATED**]")
+        st.markdown(metric_view.esc(calc.written))
         st.code(calc.arithmetic, language=None, wrap_lines=True)
         if calc.matches:
-            st.markdown(f":green[:material/check_circle: Gives the saved {calc.stated:f} (within rounding).]")
+            st.markdown(f":green[**✓ Gives the saved {calc.stated:f}**]")
         else:
-            st.markdown(f":red[:material/error: Gives {calc.result.quantize(Decimal('0.0001')).normalize():f}, "
-                        f"not the stated {calc.stated:f}. Check the note and the figures.]")
-        for i, f in enumerate(calc.figures):
-            text_col, button_col = st.columns([3, 1], vertical_alignment="center")
-            where = f"PDF page {f.page}" if f.page else "not found on the pages the note names"
-            text_col.caption(f"{f.label or 'Figure'}: {f.printed} · {where}")
-            if f.page and f.box is not None and ctx.show_box is not None:
-                button_col.button("Show", icon=":material/crop_free:", key=f"note_fig_{key}_{i}", width="stretch",
-                                  on_click=ctx.show_box, args=(f.page, f.box))
-        st.caption(":green[■] The inputs are boxed in green on their pages. To store them with the value, use "
-                   "Calculate from other figures.")
+            st.markdown(f":red[**✗ Gives {calc.result.quantize(Decimal('0.0001')).normalize():f}, not the saved "
+                        f"{calc.stated:f}.** Check the note and the figures.]")
+        st.dataframe(pd.DataFrame([{"Input": f.label or "(unnamed)", "Value": f.printed,
+                                    "Page": f"p{f.page}" if f.page else "not found"} for f in calc.figures]),
+                     hide_index=True, width="stretch", key=f"note_inputs_{key}")
+        st.caption("The inputs are boxed in green on their pages (close-ups above the PDF). To store them with "
+                   "the value, use Calculate from other figures.")
 
 
 def _show_box_button(ctx: ReviewContext, decision: review.Decision, key: str) -> None:

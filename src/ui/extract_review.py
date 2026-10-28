@@ -52,7 +52,7 @@ from src.pdf_extractor import (
     RawCandidate,
     extract_candidates,
 )
-from src.pdf_render import focus_of, render_page_png, screen_box_to_page
+from src.pdf_render import focus_of, render_band_png, render_page_png, screen_box_to_page
 from src.project_service import (
     NewFigures,
     find_documents_by_hash,
@@ -141,11 +141,11 @@ def render(config: AppConfig, open_calculations: Callable[[str], None] | None = 
     marked_values = _marked_values(states)
     calc_boxes = _calculation_boxes(ctx, states)
     if ctx is not None:
-        ctx = replace(ctx, note_calcs=_note_calculations(doc, states))
+        ctx = replace(ctx, note_calcs={metric_id: _named_inputs(extraction, calc)
+                                       for metric_id, calc in _note_calculations(doc, states).items()})
         for metric_id, calc in ctx.note_calcs.items():  # its box holds one input, not the value
             marked_values.pop(metric_id, None)
-            inputs = [(f.page - 1, tuple(f.box), f"{f.label} (input)" if f.label else "input")
-                      for f in calc.figures if f.page and f.box]
+            inputs = [(f.page - 1, tuple(f.box), f.label or "input") for f in calc.figures if f.page and f.box]
             if inputs:
                 calc_boxes[metric_id] = inputs
     for metric_id, inputs in calc_boxes.items():  # a calculated metric shows its first input when picked
@@ -176,6 +176,8 @@ def render(config: AppConfig, open_calculations: Callable[[str], None] | None = 
             and candidate_key(selected) == analysis.metric(metric_id).primary.mapped.key):
         selected = None  # its recorded box is shown instead; a replaced suggestion is no longer boxed
     with viewer_col:
+        if calc_boxes.get(focus_metric):
+            _inputs_strip(doc, calc_boxes[focus_metric], analysis.metric(focus_metric).metric.display_name)
         _pdf_viewer(doc, extraction, selected, recorded, focus_metric, ocr_words, analysis, ctx, store,
                     calc_boxes.get(focus_metric, []))
     with detail_col:
@@ -483,6 +485,51 @@ def _note_calculations(doc: dict, states: dict[str, ReviewState]) -> dict[str, N
         if calc is not None:
             found[metric_id] = calc
     return found
+
+
+def _named_inputs(extraction: ExtractionResult, calc: NoteCalculation) -> NoteCalculation:
+    """Each figure of the note named by the row it is printed in and its year column ("Total equity
+    2023"), as the reviewer's note seldom names every number; the note's own word when no row is found."""
+    return replace(calc, figures=tuple(replace(f, label=_row_name(extraction, f.page, f.box) or f.label)
+                                       if f.page and f.box else f for f in calc.figures))
+
+
+def _row_name(extraction: ExtractionResult, page: int, box: tuple) -> str | None:
+    cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+    for c in extraction.candidates:
+        x0, y0, x1, y1 = c.bbox
+        if c.page_index == page - 1 and x0 - 1 <= cx <= x1 + 1 and y0 - 1 <= cy <= y1 + 1:
+            year = column_year(c, extraction.pages[page - 1]) if c.extraction_method == TABLE_METHOD else None
+            name = " ".join(str(part) for part in ((c.raw_label or "").strip(), year) if part)
+            return name or None
+    return None
+
+
+def _inputs_strip(doc: dict, inputs: list[tuple[int, tuple, str]], metric_name: str) -> None:
+    """The selected calculated metric's inputs, every page side by side as a close-up of the rows
+    that hold them, each input boxed in green: what the value was worked out from, at a glance."""
+    pages: dict[int, list[tuple[tuple, str]]] = {}
+    for page_index, box, label in inputs:
+        pages.setdefault(page_index, []).append((tuple(box), label))  # named under the picture, not on it
+    with st.container(border=True):
+        st.markdown(f":green[:material/calculate:] **{metric_view.esc(metric_name)} is calculated** · "
+                    f"its {len(inputs)} input(s), boxed in green")
+        ordered = sorted(pages.items())
+        for start in range(0, len(ordered), 2):  # two pages per row keeps the rows readable
+            columns = st.columns(2)
+            for column, (page_index, boxes) in zip(columns, ordered[start:start + 2]):
+                with column:
+                    st.caption(f"PDF page {page_index + 1}")
+                    st.image(_band(doc["sha"], page_index, tuple((box, "") for box, _ in boxes), doc["bytes"]),
+                             width="stretch")
+                    st.caption(" · ".join(metric_view.esc(label) for _, label in boxes))
+                    st.button(f"Open page {page_index + 1}", icon=":material/open_in_full:", width="stretch",
+                              key=f"inputs_open_{page_index}", on_click=_go_to, args=(page_index + 1,))
+
+
+@st.cache_data(show_spinner=False, max_entries=200)
+def _band(sha256: str, page_index: int, boxes: tuple, _pdf_bytes: bytes) -> bytes:
+    return render_band_png(_pdf_bytes, page_index, boxes)
 
 
 @st.cache_data(show_spinner=False, max_entries=500)

@@ -1,7 +1,7 @@
 import pymupdf
 import pytest
 
-from src.pdf_render import focus_of, render_page_png, screen_box_to_page
+from src.pdf_render import focus_of, render_band_png, render_page_png, screen_box_to_page
 from src.pdf_render import visible_area as _visible_area
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -82,3 +82,14 @@ def test_several_coloured_boxes_are_drawn(simple_pdf):
 def test_zoom_below_whole_page_is_rejected(simple_pdf):
     with pytest.raises(ValueError, match="at least 1"):
         render_page_png(simple_pdf, 0, view_zoom=0.5)
+
+
+def test_band_shows_the_rows_of_all_its_boxes_and_leaves_the_pdf_alone(simple_pdf):
+    original = bytes(simple_pdf)
+    one_row = pymupdf.Pixmap(render_band_png(simple_pdf, 0, (((300, 110, 360, 122), "input of ROE"),)))
+    two_rows = pymupdf.Pixmap(render_band_png(simple_pdf, 0, (((300, 110, 360, 122), "input of ROE"),
+                                                               ((300, 200, 360, 212), "input of ROE"))))
+    assert two_rows.height > one_row.height and two_rows.width == one_row.width  # full page width, taller band
+    assert simple_pdf == original
+    with pytest.raises(ValueError, match="outside this PDF"):
+        render_band_png(simple_pdf, 5, (((300, 110, 360, 122), ""),))

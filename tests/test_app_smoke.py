@@ -6,7 +6,7 @@ import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 from src.pdf_extractor import TABLE_METHOD
-from tests.conftest import make_pdf
+from tests.conftest import html_text, make_pdf
 
 APP = Path(__file__).resolve().parent.parent / "app.py"
 PDF = make_pdf(
@@ -33,6 +33,7 @@ class FakeUpload:
 def loaded_app(monkeypatch) -> AppTest:
     monkeypatch.setattr(st, "file_uploader", lambda *a, **k: FakeUpload())
     at = AppTest.from_file(str(APP), default_timeout=60)
+    at.session_state["workbench"] = True  # the parked full workbench (docs/redesign-backlog.md)
     at.session_state["period"] = "2025/26"
     return at.run()
 
@@ -40,7 +41,7 @@ def loaded_app(monkeypatch) -> AppTest:
 def test_app_renders_without_a_pdf():
     at = AppTest.from_file(str(APP), default_timeout=60).run()
     assert not at.exception
-    assert any("Upload an annual report" in i.value for i in at.info)
+    assert "Open a saved report to see what the app read from it" in html_text(at)  # Extract, no report open
 
 
 def test_metric_table_lists_configured_metrics(monkeypatch):

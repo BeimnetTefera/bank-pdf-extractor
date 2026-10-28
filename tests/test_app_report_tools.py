@@ -63,6 +63,7 @@ def app(monkeypatch, tmp_path):
     cache = data_dir / "ocr" / f"{compute_sha256(PDF)}.json"
     write_ocr_cache(cache, [1])  # read before saving, as saving requires
     at = AppTest.from_file(str(APP), default_timeout=60)
+    at.session_state["workbench"] = True  # the parked full workbench (docs/redesign-backlog.md)
     at.session_state["bank"] = "Awash bank"
     at.session_state["period"] = "2025/26"
     at.session_state["reviewer"] = REVIEWER

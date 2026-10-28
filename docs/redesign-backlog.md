@@ -21,7 +21,10 @@ together once the redesign is finished.
 | Evidence: checks, other candidates, definition | The value's checks, the other figures found and why they were not used, the metric's definition | Evidence page | `evidence_page._checks_block`, `_candidates_block` |
 | Wording editor | Add or remove the wording (table labels, words around a number) that finds a metric, in config/mappings.yaml | Wording tab of Templates | `pages.wording_editor`, `mapping_editor` (D-065) |
 | Excel layout | The Approved Data sheet column by column, extracted or calculated | Excel layout tab of Templates | `pages.excel_layout` |
-| New figures found after a wording change | Offers to add figures the current wording finds to a saved report | Top of Extract (still there) and not on Review | `extract_review._new_figures_prompt` |
+| Full Extract workbench | The earlier Extract screen: metric table, All Figures (every number read, with filters), Validation Log, Approve all verified, and a figure's details | Extract page before D-094 | `extract_review.render`, opened when `st.session_state.workbench` is set (the app tests use it) |
+| All figures list | Every number read from the PDF, filtered by page, year or value, with *Use this figure for a metric* | All Figures tab of the old Extract | `extract_review._figures_table`, `_figure_details` (the top search finds printed figures meanwhile) |
+| Approve all verified | Approves in one go the suggested figures with no warning, converted and positive, after a tick | Old Extract, under the metric table | `extract_review._approve_all_verified`, `bulk_review` (D-072) |
+| Full validation log | Every finding of the analysis, notes included, as one list | Validation Log tab of the old Extract | `metric_view.validation_log` (Extract now lists one status per metric, D-094) |
 
 Merging duplicate reports is not parked: the mockup's **Review duplicates** button on Reports
 opens it.

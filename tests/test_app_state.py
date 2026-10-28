@@ -71,6 +71,7 @@ def test_fields_follow_the_saved_report_not_stale_values(app):
 def test_a_link_with_the_report_reopens_it_in_a_new_session(app):
     document_id = save(app)
     fresh = AppTest.from_file(str(APP), default_timeout=60)  # a reload or a new browser tab
+    fresh.session_state["workbench"] = True  # the parked full workbench (docs/redesign-backlog.md)
     fresh.session_state["reviewer"] = "Analyst A"
     fresh.query_params["report"] = document_id
     fresh.run()
@@ -86,6 +87,7 @@ def test_a_link_with_the_report_reopens_it_in_a_new_session(app):
 def test_a_link_to_a_missing_report_explains_and_is_dropped(app, monkeypatch):
     monkeypatch.setattr(st, "file_uploader", lambda *a, **k: None)  # nothing uploaded in the new tab
     fresh = AppTest.from_file(str(APP), default_timeout=60)
+    fresh.session_state["workbench"] = True  # the parked full workbench (docs/redesign-backlog.md)
     fresh.query_params["report"] = "no-such-report"
     fresh.run()
     assert not fresh.exception

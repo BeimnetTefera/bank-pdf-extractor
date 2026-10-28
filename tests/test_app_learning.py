@@ -53,6 +53,7 @@ def app(monkeypatch, tmp_path):
     monkeypatch.setattr(src.config_loader, "load_config", load_from_temp)
     monkeypatch.setattr(st, "file_uploader", lambda *a, key=None, **k: Upload() if key == "upload_main" else None)
     at = AppTest.from_file(str(APP), default_timeout=60)
+    at.session_state["workbench"] = True  # the parked full workbench (docs/redesign-backlog.md)
     at.session_state["bank"] = "Awash bank"
     at.session_state["period"] = "2025/26"
     at.session_state["reviewer"] = REVIEWER

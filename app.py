@@ -9,6 +9,7 @@ from src.config_loader import ConfigError, load_config
 from src.seed_data import restore_seed
 from src.ui import (calculations, evidence_page, extract_review, new_report, pages, review_page, routes,
                     sector_page, shell, style)
+from src.ui import extract_page as extract_page_ui
 
 # "expanded" rather than the default "auto": with "auto" the browser re-decides on window
 # width each time the sidebar is redrawn, so it could close by itself after a rerun.
@@ -35,7 +36,11 @@ def home_page() -> None:
 
 
 def extract_page() -> None:
-    extract_review.render(config, open_calculations=_open_calculations)
+    if st.session_state.get("workbench"):  # the parked full workbench (docs/redesign-backlog.md), kept for its tests
+        extract_review.render(config, open_calculations=_open_calculations)
+        return
+    extract_page_ui.render(config, open_review=lambda: st.switch_page(app_pages[7]),
+                           open_reports=lambda: st.switch_page(app_pages[3]))
 
 
 def review() -> None:

@@ -9,6 +9,7 @@ figures and boxes come from extract_review.prepare, the same as the Extract page
 from __future__ import annotations
 
 import io
+import json
 from collections.abc import Callable
 from contextlib import closing
 from datetime import datetime
@@ -24,8 +25,9 @@ from src.calculated_entries import number_text, saved_calculation
 from src.config_loader import AppConfig
 from src.database import connect
 from src.models import MetricCandidate, MetricResult
+from src.project_service import get_document
 from src.review_service import ReviewError, ReviewState
-from src.ui import calc_panel, extract_review, metric_view, review_panel, routes, style
+from src.ui import calc_panel, extract_review, metric_view, review_panel, routes, shell, style
 from src.ui.extract_review import Prepared
 from src.unit_normalizer import unit_label
 from src.value_input import stored_on_approval
@@ -53,6 +55,7 @@ FILTER_LABELS = {"to_review": "To review", "warnings": "Warnings", "calculated":
 DOTS = {"needs_review": ":orange[●]", "flagged": ":red[●]", "not_found": ":gray[○]", "corrected": ":blue[●]",
         "approved": ":green[●]", "not_reported": ":gray[●]", "calculated": ":blue[●]"}
 ZOOMS = list(extract_review.ZOOM_LEVELS)
+QUEUE_PAGE = 12  # metrics per page of the queue
 
 
 def render(config: AppConfig, open_calculations: Callable[[str], None] | None = None,
@@ -64,13 +67,16 @@ def render(config: AppConfig, open_calculations: Callable[[str], None] | None = 
         if open_reports is not None:
             st.button("Open Reports", icon=":material/description:", type="primary", on_click=open_reports)
         return
+    if not _saved_fields(config, doc["document_id"]):
+        st.error("That report is no longer in the database.", icon=":material/error:")
+        return
     with st.spinner("Reading the report..."):
         p = extract_review.prepare(config, doc)
     reviews = extract_review._review_displays(p.analysis, p.ctx, p.states)
     statuses = metric_view.table_statuses(p.analysis, reviews)
     with st.container(key="review_work"):
         _work_bar(p, open_calculations)
-        queue_col, viewer_col, insp_col = st.columns([2.7, 5.2, 3.3], gap=None)
+        queue_col, viewer_col, insp_col = st.columns([2.5, 5.6, 3.1], gap=None)
         with queue_col:
             shown_ids = _queue(p, statuses, reviews)
         selected = st.session_state.get("selected_metric")
@@ -80,6 +86,21 @@ def render(config: AppConfig, open_calculations: Callable[[str], None] | None = 
             _viewer(p, selected)
         with insp_col:
             _inspector(p, selected, statuses, shown_ids)
+
+
+def _saved_fields(config: AppConfig, document_id: str) -> bool:
+    """Bank, year and metrics from the saved report itself. They are the Extract page's field values,
+    which Streamlit forgets while that page is not shown, so Review never relies on them."""
+    with closing(connect(config.settings.database_path)) as conn:
+        row = get_document(conn, document_id)
+    if row is None:
+        return False
+    values = {"bank": row["bank_name"], "period": row["reporting_period"],
+              "metric_selection": json.loads(row["metric_ids"])}
+    for key, value in values.items():
+        st.session_state[key] = value
+        st.session_state[extract_review.FIELD_COPIES[key]] = value  # so Extract shows the same report
+    return True
 
 
 # --- the bar over the panes ----------------------------------------------------------------
@@ -133,15 +154,19 @@ def _queue(p: Prepared, statuses: dict[str, str], reviews: dict[str, metric_view
         grouped = [(group, [m for m in members if m in shown]) for group, members in GROUPS.items()]
         grouped.append(("Other", [m for m in shown if not any(m in members for members in GROUPS.values())]))
         selected = st.session_state.get("selected_metric")
-        order = []
-        for group, members in grouped:
-            if not members:
-                continue
-            st.html(f'<div class="bpe-qgroup">{escape(group)}</div>')
-            for metric_id in members:
-                order.append(metric_id)
-                _queue_row(p, metric_id, names[metric_id], statuses[metric_id], metric_id in calculated,
-                           reviews.get(metric_id), metric_id == selected)
+        order = [m for _, members in grouped for m in members]  # Previous / Next go through all of them
+        group_of = {m: group for group, members in grouped for m in members}
+        if selected in order and st.session_state.get("_queue_follows") != selected:
+            st.session_state.review_qpage = order.index(selected) // QUEUE_PAGE  # show the page of the metric picked
+            st.session_state._queue_follows = selected
+        start, end = shell.pager("review_qpage", len(order), QUEUE_PAGE)
+        last_group = None
+        for metric_id in order[start:end]:
+            if group_of[metric_id] != last_group:
+                last_group = group_of[metric_id]
+                st.html(f'<div class="bpe-qgroup">{escape(last_group)}</div>')
+            _queue_row(p, metric_id, names[metric_id], statuses[metric_id], metric_id in calculated,
+                       reviews.get(metric_id), metric_id == selected)
         if not order:
             st.html('<div class="bpe-qmore">No metric matches. Choose another filter.</div>')
     return order
@@ -203,7 +228,7 @@ def _viewer(p: Prepared, metric_id: str | None) -> None:
         if inputs:
             _inputs_strip(p, inputs)
         with st.container(key="vbar"):
-            cols = st.columns([0.6, 0.9, 0.9, 0.6, 0.6, 0.9, 0.6, 1.6, 2.6], vertical_alignment="center")
+            cols = st.columns([0.55, 0.8, 0.85, 0.55, 0.55, 0.8, 0.55, 1.4, 2.7], vertical_alignment="center")
             cols[0].button("", icon=":material/chevron_left:", key="rv_prev_page", disabled=page <= 1,
                            on_click=extract_review._go_to, args=(page - 1,), help="Previous page")
             cols[1].number_input("Page", min_value=1, max_value=page_count, key="viewer_page",
@@ -497,8 +522,8 @@ def _steps(p: Prepared, metric_id: str | None, shown_ids: list[str]) -> None:
     following = shown_ids[min(at + 1, len(shown_ids) - 1)]
     names = {m.metric.id: m.metric.display_name for m in p.analysis.metrics}
     with st.container(key="isec_steps"):
-        prev_col, next_col = st.columns([2, 3], vertical_alignment="center")
-        prev_col.button("‹ Previous", key="metric_prev", disabled=at <= 0, width="stretch",
+        prev_col, next_col = st.columns([1.6, 4], vertical_alignment="center")
+        prev_col.button("‹", key="metric_prev", help="Previous metric (Alt+↑)", disabled=at <= 0, width="stretch",
                         on_click=_select, args=(p, shown_ids[max(at - 1, 0)]),
                         shortcut=extract_review.PREVIOUS_SHORTCUT)
         next_col.button(f"Next: {names[following]} ›" if at >= 0 else f"Start: {names[following]} ›",

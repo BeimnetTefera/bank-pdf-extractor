@@ -19,6 +19,8 @@ together once the redesign is finished.
 | Sector "Not reported" | Records that no sector figure exists for a year, with a reason | Popover on Sector data | `sector_data.record_not_reported` |
 | Note on a sector value | A free note saved with a sector value | Sector data form | `sector_data.record_value(..., note)` |
 | Evidence: checks, other candidates, definition | The value's checks, the other figures found and why they were not used, the metric's definition | Evidence page | `evidence_page._checks_block`, `_candidates_block` |
+| Wording editor | Add or remove the wording (table labels, words around a number) that finds a metric, in config/mappings.yaml | Wording tab of Templates | `pages.wording_editor`, `mapping_editor` (D-065) |
+| Excel layout | The Approved Data sheet column by column, extracted or calculated | Excel layout tab of Templates | `pages.excel_layout` |
 | New figures found after a wording change | Offers to add figures the current wording finds to a saved report | Top of Extract (still there) and not on Review | `extract_review._new_figures_prompt` |
 
 Merging duplicate reports is not parked: the mockup's **Review duplicates** button on Reports

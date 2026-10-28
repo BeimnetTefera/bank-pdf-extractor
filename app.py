@@ -149,7 +149,7 @@ MENU = (("Workspace", ((app_pages[3], str(reports_count)), (app_pages[1], None),
 query = shell.top_bar(config)
 nav_col, page_col = st.columns([1, 6], gap=None)
 with nav_col:
-    shell.menu(MENU, rail=navigation.url_path == "review")
+    shell.menu(MENU, rail=False)  # the full menu on every page, Review too (user feedback 2026-10-28)
 with page_col, st.container(key="page"):
     shell.search_results(config, query, _open_hit)
     navigation.run()

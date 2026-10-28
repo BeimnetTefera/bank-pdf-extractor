@@ -476,7 +476,7 @@ def _review_context(config: AppConfig, doc: dict, analysis: AnalysisResult,
         st.session_state.pan_x, st.session_state.pan_y = round(fx * 100), round(fy * 100)
         _auto_zoom()
 
-    ctx = ReviewContext(config.settings.database_path, document_id, ids, st.session_state.reviewer,
+    ctx = ReviewContext(config.settings.database_path, document_id, ids, st.session_state.get("reviewer", ""),
                         extraction.page_count, st.session_state.get("viewer_page", 1), finished, show_box,
                         config=config)
     if prompt:

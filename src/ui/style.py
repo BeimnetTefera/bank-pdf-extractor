@@ -143,6 +143,10 @@ header[data-testid="stHeader"] { display: none; }
 .bpe-stepnum { width: 22px; height: 22px; border-radius: 50%; border: 1px solid #CDD2DA; display: grid; place-items: center;
   font: 500 11px "IBM Plex Mono", monospace; flex: none; color: #4B5363; }
 
+/* pager under a long list */
+[class*="st-key-pager_"] { padding: 6px 12px; border-top: 1px solid #EEF0F3; }
+[class*="st-key-pager_"] button { min-height: 30px; }
+
 /* review screen (D-091, D-092) */
 [class*="st-key-approve_"] button, .st-key-approve_main button { min-height: 44px; font-size: 15px; }
 .st-key-metric_steps { background: #FFFFFF; border: 1px solid #E3E6EB; border-radius: 8px; padding: 8px 12px; gap: 4px; }
@@ -171,7 +175,9 @@ header[data-testid="stHeader"] { display: none; }
 .bpe-qmore { padding: 12px; font-size: 12px; color: #5F6775; }
 .st-key-viewer { background: #E9EBEF; min-height: 100%; gap: 0; }
 .st-key-vbar { background: #FFFFFF; border-bottom: 1px solid #E3E6EB; padding: 6px 12px; }
-.st-key-vbar button { min-height: 32px; }
+.st-key-vbar button { min-height: 32px; padding: 0 8px; }
+.st-key-vbar .bpe-num { white-space: nowrap; }
+.st-key-vbar [data-testid="stCheckbox"] p { white-space: nowrap; }
 .st-key-vpage { padding: 16px; }
 .st-key-strip { background: #FFFFFF; border: 1px solid #E3E6EB; border-radius: 8px; padding: 14px 16px; margin: 16px 16px 0; gap: 12px; }
 .st-key-insp { background: #FFFFFF; border-left: 1px solid #E3E6EB; min-height: 100%; gap: 0; }

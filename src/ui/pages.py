@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from html import escape
 
+import pandas as pd
 import streamlit as st
 
 from src import bulk_review, ocr, report_corrections, report_merge, review_service
@@ -20,8 +21,9 @@ from src.database import connect
 from src.evidence import format_value
 from src.excel_exporter import fiscal_year_label, report_years
 from src.mapping_editor import KINDS, MappingEditError, add_wording, list_wording, remove_wording
+from src.metric_editor import MetricEditError, set_definition
 from src.project_service import list_documents
-from src.ui import routes, style
+from src.ui import routes, shell, style
 from src.ui.export_panel import export_button
 
 TESTER_PROMPT = CONFIG_DIR.parent / "docs" / "tester-prompt.md"  # shown on Home for the Claude browser extension
@@ -59,6 +61,7 @@ def home() -> None:
 
 
 REPORT_COLUMNS = [3.0, 1.0, 0.7, 1.7, 1.8, 1.2, 0.9]  # bank, fiscal year, pages, progress, work left, status, open
+REPORTS_PAGE, METRICS_PAGE = 10, 15  # rows per page of the Reports and Templates tables
 
 
 def bank_reports(config: AppConfig, open_report: Callable[[str], str | None],
@@ -97,7 +100,8 @@ def bank_reports(config: AppConfig, open_report: Callable[[str], str | None],
             for col, title in zip(st.columns(REPORT_COLUMNS, vertical_alignment="center"),
                                   ("Bank", "Fiscal year", "Pages", "Progress", "Work left", "Status")):
                 col.markdown(title)
-        for d in documents:
+        start, end = shell.pager("reports_page", len(documents), REPORTS_PAGE)
+        for d in documents[start:end]:
             _report_row(config, d, progress[d["id"]], totals[d["id"]], not_reported[d["id"]], finished[d["id"]],
                         copies[d["sha256"]] > 1, work[d["id"]], open_report, open_calculations)
 
@@ -351,37 +355,61 @@ def _deletion_log(config: AppConfig) -> None:
 
 
 def templates(config: AppConfig) -> None:
-    """Templates, as in the redesign mockup (D-092): what the app looks for, how it names it, where it goes."""
+    """Templates (D-092, D-093): what the app looks for in a report and what each column means.
+    The meaning of a metric can be edited here; it is saved to config/metrics.yaml with your name."""
     st.markdown("## Templates")
-    st.html('<p class="bpe-sub">What the app looks for in a report, how it names it, and where it goes in the '
+    st.html('<p class="bpe-sub">What the app looks for in a report, what each column means, and where it goes in the '
             'Excel export.</p>')
     template = config.export_template
-    metrics_tab, wording_tab, calc_tab, layout_tab = st.tabs(
-        [f"Metrics {len(config.metrics)}", "Wording", f"Calculated columns {len(template.calculated)}", "Excel layout"])
+    metrics_tab, calc_tab = st.tabs([f"Metrics {len(config.metrics)}", f"Calculated columns {len(template.calculated)}"])
     with metrics_tab, st.container(key="panel_table_metrics"):
         with st.container(key="thead_metrics_tools"):
             find_col, hint_col = st.columns([2, 3], vertical_alignment="center")
             found = find_col.text_input("Find a metric", key="templates_find", placeholder="Find a metric",
                                         label_visibility="collapsed", icon=":material/search:")
-            hint_col.html('<p class="bpe-minor" style="text-align:right;margin:0">Changes are saved to the '
-                          'configuration with your name.</p>')
+            hint_col.html('<p class="bpe-minor" style="text-align:right;margin:0">Edit a meaning in the table, then '
+                          'press Save. Changes are saved to the configuration with your name.</p>')
         shown = [m for m in config.metrics if not found or found.casefold() in m.display_name.casefold()]
-        st.html(_metrics_table(shown))
-    with wording_tab:
-        wording_editor(config)
+        start, end = shell.pager("templates_page", len(shown), METRICS_PAGE)
+        _meanings_editor(config, shown[start:end], key=f"meanings_{start}_{found}_{st.session_state.get('_meanings_saved', 0)}")
     with calc_tab:
         st.html(_calculated_table(config))
-    with layout_tab:
-        rows = excel_layout(config)
-        st.caption(
-            f"The Approved Data sheet of the Excel export, column by column, from config/export_template.yaml "
-            f"(the Shega bank timeseries spreadsheet): {len(template.extracted())} extracted columns and "
-            f"{len(template.calculated)} calculated columns."
-        )
-        group = st.segmented_control("Show", ["All", "Extracted", "Calculated"], default="All", key="layout_group")
-        shown_rows = [r for r in rows if group in (None, "All") or r["Group"] == group]
-        st.dataframe(shown_rows, hide_index=True, width="stretch", height=700,
-                     column_config={"#": st.column_config.NumberColumn(width=40)})
+
+
+def _meanings_editor(config: AppConfig, metrics, key: str) -> None:
+    """The metrics as a table whose Meaning column can be edited; Save writes the changed ones."""
+    original = pd.DataFrame([{
+        "Metric": m.display_name, "Unit": m.expected_unit, "Excel column": m.export_column or "none",
+        "Meaning": m.definition, "Standard formula": readable_formula(m.formula) if m.formula else (
+            "printed" if m.active else "not used"),
+        "Status": "Active" if m.active else "Inactive"} for m in metrics])
+    edited = st.data_editor(
+        original, hide_index=True, width="stretch", num_rows="fixed", key=key,
+        disabled=["Metric", "Unit", "Excel column", "Standard formula", "Status"],
+        column_config={"Metric": st.column_config.TextColumn(width=170),
+                       "Unit": st.column_config.TextColumn(width=70),
+                       "Excel column": st.column_config.TextColumn(width=170),
+                       "Meaning": st.column_config.TextColumn(width="large", help="What the figure is: edit and Save."),
+                       "Standard formula": st.column_config.TextColumn(width=180),
+                       "Status": st.column_config.TextColumn(width=80)})
+    changed = [(m, edited.iloc[i]["Meaning"]) for i, m in enumerate(metrics)
+               if str(edited.iloc[i]["Meaning"] or "").strip() != m.definition]
+    with st.container(key="meanings_save"):
+        if st.button(f"Save {len(changed)} meaning(s)" if changed else "Save meanings", key="meanings_save_button",
+                     type="primary", disabled=not changed):
+            path = (config.config_dir or CONFIG_DIR) / "metrics.yaml"
+            errors = []
+            for metric, text in changed:
+                try:
+                    set_definition(path, metric.id, str(text), st.session_state.get("reviewer", ""))
+                except MetricEditError as exc:
+                    errors.append(f"**{metric.display_name}**: {exc}")
+            if errors:
+                st.error("  \n".join(errors), icon=":material/error:")
+            else:
+                st.session_state._meanings_saved = st.session_state.get("_meanings_saved", 0) + 1
+                st.toast(f"Saved {len(changed)} meaning(s)", icon=":material/check_circle:")
+                st.rerun()
 
 
 def _metrics_table(metrics) -> str:

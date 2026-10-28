@@ -92,3 +92,30 @@ def test_new_report_reads_saves_and_opens_the_review(tmp_path):
     with closing(connect(data_dir / "app.db")) as conn:
         (doc,) = list_documents(conn)
     assert (doc["bank_name"], doc["reporting_period"]) == (BANK, "2025/26")
+
+
+def test_review_queue_is_paged_and_follows_the_metric_picked(app):
+    document_id = save(app)
+    page = AppTest.from_function(review_screen, args=(str(app.db_path.parent), document_id), default_timeout=60)
+    page.session_state["reviewer"] = "Analyst A"
+    page.run()
+    assert not page.exception
+    shown = [b for b in page.button if (b.key or "").startswith("q_")]
+    assert 0 < len(shown) <= 12  # one page of the queue
+    page.button(key="review_qpage_next").click().run()
+    assert page.session_state["review_qpage"] == 1
+    page.button(key="metric_next").click().run()  # the first metric is on page 1: the queue goes back to it
+    assert page.session_state["review_qpage"] == 0 and not page.exception
+
+
+def test_review_keeps_working_when_the_extract_fields_are_forgotten(app):
+    """Streamlit drops a widget's value when its page is not shown; Review reads the saved report instead."""
+    document_id = save(app)
+    page = AppTest.from_function(review_screen, args=(str(app.db_path.parent), document_id), default_timeout=60)
+    page.session_state["reviewer"] = "Analyst A"
+    page.run()
+    for key in ("bank", "period", "metric_selection"):
+        del page.session_state[key]  # as after a few clicks on Review
+    page.button(key="metric_next").click().run()
+    assert not page.exception
+    assert page.session_state["metric_selection"] and page.session_state["bank"] == BANK

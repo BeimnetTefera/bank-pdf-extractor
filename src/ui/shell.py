@@ -75,3 +75,21 @@ def search_results(config: AppConfig, query: str, open_hit: Callable[[search.Hit
             text_col, open_col = st.columns([6, 1], vertical_alignment="center")
             text_col.markdown(f"{icons[hit.kind]} **{escape(hit.title)}**  \n:gray[{escape(hit.detail)}]")
             open_col.button("Open", key=f"search_open_{i}", width="stretch", on_click=open_hit, args=(hit,))
+
+
+def pager(key: str, total: int, size: int) -> tuple[int, int]:
+    """Page through a long list: draws "‹ Page n of N ›" when it needs more than one page and
+    returns the (start, end) slice of the page shown. The page is kept in st.session_state[key]."""
+    pages = max(1, -(-total // size))
+    page = min(max(0, st.session_state.get(key, 0)), pages - 1)
+    st.session_state[key] = page
+    if pages > 1:
+        with st.container(key=f"pager_{key}"):
+            prev_col, text_col, next_col = st.columns([1, 2, 1], vertical_alignment="center")
+            prev_col.button("‹", key=f"{key}_prev", disabled=page == 0, width="stretch", help="Previous page",
+                            on_click=st.session_state.__setitem__, args=(key, page - 1))
+            text_col.html(f'<div class="bpe-minor" style="text-align:center;white-space:nowrap" '
+                          f'title="{total} items">Page {page + 1} of {pages}</div>')
+            next_col.button("›", key=f"{key}_next", disabled=page >= pages - 1, width="stretch", help="Next page",
+                            on_click=st.session_state.__setitem__, args=(key, page + 1))
+    return page * size, min(total, (page + 1) * size)

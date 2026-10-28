@@ -18,7 +18,7 @@ from src.project_service import get_document, list_documents, save_analysis
 from src.report_period import canonical_period, period_from_text, suggested_period
 from src.review_service import ReviewError, delete_report
 from tests.conftest import make_pdf
-from tests.test_app_review import bank_reports_page
+from tests.test_app_review import parked_tools_page
 
 BANKS = load_config().banks
 REVIEWER = "Analyst A"
@@ -192,7 +192,7 @@ def test_fix_panel_applies_only_when_pressed(settings):
     odd = save_report(settings)
     as_saved_earlier(settings, document_id, "Bank of abyssinia", "2026")
     as_saved_earlier(settings, odd, "Mystery bank", "2025/26")
-    page = AppTest.from_function(bank_reports_page, args=(str(settings.data_dir),), default_timeout=60)
+    page = AppTest.from_function(parked_tools_page, args=(str(settings.data_dir),), default_timeout=60)
     page.session_state["reviewer"] = REVIEWER
     page.run()
     assert not page.exception

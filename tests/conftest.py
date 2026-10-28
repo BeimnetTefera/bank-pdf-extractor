@@ -37,3 +37,8 @@ def settings(tmp_path: Path) -> AppSettings:
 @pytest.fixture
 def simple_pdf() -> bytes:
     return make_pdf([[("Synthetic Bank S.C.", []), ("Total assets", ["1,234,567", "987,654"])]])
+
+
+def html_text(at) -> str:
+    """The text of the HTML blocks the redesign draws (summary strip, chips, tables)."""
+    return " ".join(getattr(e.proto, "body", "") for e in at.get("html"))

@@ -1,0 +1,77 @@
+"""The frame around every page, as in the redesign mockup (D-092): a top bar with the product name,
+the search box and the reviewer, then the menu on the left (two groups with counts; icons only on
+the Review page) and the page itself.
+
+Streamlit's own sidebar is not used, so the top bar can run across the whole window.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Sequence
+from contextlib import closing
+from html import escape
+
+import streamlit as st
+
+from src import bulk_review, search
+from src.config_loader import AppConfig
+from src.database import connect
+from src.project_service import list_documents
+from src.ui import style
+
+SEARCH_KEY = "global_search"
+
+
+def top_bar(config: AppConfig) -> str:
+    """Brand, search box and reviewer; returns the search text."""
+    with st.container(key="topbar"):
+        brand_col, search_col, me_col = st.columns([2.2, 4, 2], vertical_alignment="center")
+        brand_col.html(f'<div class="bpe-brand"><span class="bpe-mark">{style.mark_svg()}</span>'
+                       'Bank PDF Extractor</div>')
+        query = search_col.text_input("Search", key=SEARCH_KEY, placeholder="Search reports, metrics or a printed figure",
+                                      label_visibility="collapsed", icon=":material/search:")
+        name = st.session_state.get("reviewer", "") or "no name"
+        me_col.html(f'<div class="bpe-me"><span class="bpe-avatar-lg">{escape(style.initials(name))}</span>'
+                    f'{escape(name)} · Reviewer</div>')
+    return query or ""
+
+
+def menu_counts(config: AppConfig) -> tuple[int, int]:
+    """(saved reports, metrics waiting for review across them)."""
+    with closing(connect(config.settings.database_path)) as conn:
+        documents = list_documents(conn)
+        waiting = sum(bulk_review.outstanding_work(conn, d["id"], config).count for d in documents)
+    return len(documents), waiting
+
+
+def menu(groups: Sequence[tuple[str, Sequence[tuple[object, str | None]]]], rail: bool) -> None:
+    """The left menu: (group label, [(page, count text)]). As a rail: icons only, no labels or counts."""
+    with st.container(key="nav_rail" if rail else "nav"):
+        for label, pages in groups:
+            if not rail:
+                st.html(f'<div class="bpe-group">{escape(label)}</div>')
+            for page, count in pages:
+                if rail:
+                    st.page_link(page, label=" ", help=page.title, width="stretch")
+                    continue
+                link_col, count_col = st.columns([5, 1], vertical_alignment="center", gap=None)
+                link_col.page_link(page, width="stretch")
+                if count:
+                    count_col.html(f'<span class="bpe-count">{escape(count)}</span>')
+
+
+def search_results(config: AppConfig, query: str, open_hit: Callable[[search.Hit], None]) -> None:
+    """The hits for the search box, each with Open; nothing when the box is empty."""
+    if not query.strip():
+        return
+    with closing(connect(config.settings.database_path)) as conn:
+        hits = search.search(conn, config, query)
+    with st.container(key="panel_search"):
+        st.markdown(f"**Search** · “{escape(query.strip())}”")
+        if not hits:
+            st.caption("Nothing found. Try a bank, a fiscal year, a metric name or the digits of a printed figure.")
+        icons = {"report": ":material/description:", "metric": ":material/check_box:", "figure": ":material/pin:"}
+        for i, hit in enumerate(hits):
+            text_col, open_col = st.columns([6, 1], vertical_alignment="center")
+            text_col.markdown(f"{icons[hit.kind]} **{escape(hit.title)}**  \n:gray[{escape(hit.detail)}]")
+            open_col.button("Open", key=f"search_open_{i}", width="stretch", on_click=open_hit, args=(hit,))

@@ -12,7 +12,7 @@ from src.database import connect
 from src.pdf_extractor import NARRATIVE_METHOD, TABLE_METHOD, extract_candidates
 from src.ui import extract_review
 from tests.conftest import make_pdf
-from tests.test_app_review import app, bank_reports_page, button, save  # noqa: F401  (app is a fixture)
+from tests.test_app_review import app, button, parked_tools_page, save  # noqa: F401  (app is a fixture)
 
 ROWS_PER_PAGE, PAGES = 30, 5
 
@@ -162,7 +162,7 @@ def test_metric_details_explain_definition_unit_column_and_formula(app):
 
 def test_bank_reports_lists_work_left_and_opens_a_metric(app):
     document_id = save(app)
-    page = AppTest.from_function(bank_reports_page, args=(str(app.db_path.parent),), default_timeout=60)
+    page = AppTest.from_function(parked_tools_page, args=(str(app.db_path.parent),), default_timeout=60)
     page.run()
     assert any(e.label.startswith("Work left (") for e in page.expander)
     assert any("Not reviewed yet" in m.value for m in page.markdown)

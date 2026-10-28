@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from contextlib import closing
 from datetime import datetime, timezone
+from html import escape
 from decimal import Decimal
 
 import pandas as pd
@@ -27,7 +28,7 @@ from src.external_sources import SavedSource, add_cross_check, source_crop_png, 
 from src.pdf_render import focus_of, render_crop_png, render_page_png
 from src.project_service import get_document, list_documents
 from src.review_service import ReviewError
-from src.ui import extract_review, routes, source_form
+from src.ui import extract_review, routes, source_form, style
 from src.ui.metric_view import esc
 
 STATUS_COLORS = {"approved": "green", "pending": "blue", "needs_review": "orange", "not_found": "gray",
@@ -48,11 +49,16 @@ def _crop_png(sha256: str, page_index: int, box: tuple, _pdf: bytes, scale: floa
 # --- Evidence page ------------------------------------------------------------------------
 
 def render_evidence(config: AppConfig) -> None:
-    st.markdown("## Evidence")
     if st.query_params.get("sector"):
+        st.markdown("## Evidence")
         _render_sector(config, st.query_params["sector"], st.query_params.get("metric", ""))
         return
-    report_id, metric_id = _pickers(config, with_metric=True)
+    report_id, metric_id = st.query_params.get("report"), st.query_params.get("metric")
+    with closing(connect(config.settings.database_path)) as conn:
+        named = report_id and metric_id and get_document(conn, report_id) is not None
+    if not named:  # the record itself has no pickers; they help only when the address names no value
+        st.markdown("## Evidence")
+        report_id, metric_id = _pickers(config, with_metric=True)
     if report_id is None or metric_id is None:
         return
     with closing(connect(config.settings.database_path)) as conn:
@@ -66,17 +72,20 @@ def render_evidence(config: AppConfig) -> None:
             if words is not None:
                 words.close()
 
-    _header(ev)
-    _note_block(ev)
-    _source_block(config, ev, pdf)
-    _cross_check_block(config, ev)
-    _checks_block(ev)
-    _candidates_block(ev)
-    _history_block(ev)
-    with st.expander("Metric definition (Templates)"):
-        st.markdown(f"**{esc(ev.display_name)}** · unit `{ev.expected_unit or '?'}` · Excel column "
-                    f"`{ev.export_column or 'none (Source Evidence only)'}`")
-        st.write(ev.definition or "No definition in config/metrics.yaml.")
+    # Laid out as the redesign mockup's evidence record (screen 6, D-092).
+    _record_header(config, ev, pdf)
+    with st.container(key="panel_ev_how"):
+        if ev.note_calc is not None or (ev.source_type == "calculated" and ev.calculation is not None):
+            _worked_out(config, ev, pdf)
+        else:
+            st.markdown("#### Where the value is printed")
+            _source_block(config, ev, pdf)
+            _note_block(ev)
+    history_col, cross_col = st.columns([3, 2], gap="medium")
+    with history_col, st.container(key="panel_ev_history"):
+        _history_block(ev)
+    with cross_col, st.container(key="panel_ev_cross"):
+        _cross_check_block(config, ev)
 
 
 def _report_pdf(config: AppConfig, document) -> tuple[bytes | None, PdfWords | None]:
@@ -89,6 +98,121 @@ def _report_pdf(config: AppConfig, document) -> tuple[bytes | None, PdfWords | N
         st.warning(f"The page image cannot be shown. {exc}", icon=":material/warning:")
         return None, None
     return pdf, PdfWords(pdf)
+
+
+def _worked_out(config: AppConfig, ev: MetricEvidence, pdf: bytes | None) -> None:
+    """A calculated value as in the mockup: the arithmetic and its check, the note, the input lines
+    boxed in green, and a table of inputs named by their printed row and year column."""
+    st.markdown("#### How the value was worked out")
+    if ev.calculation is not None and ev.source_type == "calculated":
+        arithmetic, ok = ev.calculation.arithmetic, True
+        stated = ev.value
+        figures = [(i.label, i.printed or number_text(i.value, i.unit), number_text(i.value, i.unit), i.page, i.box,
+                    i.column_year) for i in ev.calc_inputs]
+    else:
+        c = ev.note_calc
+        arithmetic, ok, stated = c.arithmetic, c.matches, c.stated
+        figures = [(f.label, f.printed, number_text(f.value, f.unit), f.page, f.box, None) for f in c.figures]
+    names = _row_names(config, ev.document["id"], [(pg, box) for _, _, _, pg, box, _ in figures])
+    st.html(f'<div class="bpe-arithbox">{escape(arithmetic)}</div>')
+    if ok:
+        st.html(f'<span class="bpe-pass">✓ The arithmetic gives the saved {escape(f"{stated:f}")} (within rounding).</span>')
+    else:
+        st.html(f'<span class="bpe-fail">✗ The arithmetic does not give the saved {escape(f"{stated:f}")}. '
+                'Check the note and the figures.</span>')
+    note = ev.entry_reason or ev.approval_note
+    if note:
+        st.html(f'<blockquote class="bpe-quote">Reviewer\'s note: {escape(note)}</blockquote>')
+    pages: dict[int, list[tuple]] = {}
+    for _, _, _, page, box, _ in figures:
+        if page and box is not None:
+            pages.setdefault(page, []).append((tuple(box), ""))
+    if pdf is not None:
+        for page, boxes in sorted(pages.items()):
+            st.image(extract_review._band(ev.document["sha256"], page - 1, tuple(boxes), pdf), width="stretch")
+    rows = []
+    for (label, printed, full, page, box, year), name in zip(figures, names):
+        shown = name or (f"{label} {year}" if year else label) or "Figure"
+        where = f"PDF page {page}" if page else "not found on the pages the note names"
+        rows.append(f'<tr><td>{escape(shown)}</td><td class="r bpe-num">{escape(printed)}</td>'
+                    f'<td class="r bpe-num">{escape(full)}</td><td>{escape(where)}</td></tr>')
+    st.html('<table class="bpe-itable"><thead><tr><th>Input</th><th class="r">As printed</th>'
+            '<th class="r">Full value</th><th>Where</th></tr></thead><tbody>' + "".join(rows) + "</tbody></table>")
+    for calc_input, source in ev.calc_input_sources:  # an input taken from another document says which (D-081)
+        st.markdown(f"**{esc(calc_input.label)}** comes from an external source:")
+        _external_source_block(config, source, calc_input.label)
+
+
+def _row_names(config: AppConfig, document_id: str, places: list[tuple]) -> list[str | None]:
+    """Each input named by the row it is printed in and its year column ("Total equity 2023")."""
+    names = []
+    with closing(connect(config.settings.database_path)) as conn:
+        for page, box in places:
+            if not page or box is None:
+                names.append(None)
+                continue
+            cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+            found = None
+            for r in conn.execute("SELECT raw_label, period_year, bbox FROM candidates WHERE document_id = ? AND "
+                                  "page_index = ?", (document_id, page - 1)):
+                x0, y0, x1, y1 = json.loads(r["bbox"])
+                if x0 - 1 <= cx <= x1 + 1 and y0 - 1 <= cy <= y1 + 1:
+                    found = " ".join(str(v) for v in (r["raw_label"], r["period_year"]) if v) or None
+                    break
+            names.append(found)
+    return names
+
+
+EV_CHIPS = {"approved": "ok", "pending": "warn", "needs_review": "warn", "not_found": "muted", "not_reported": "muted",
+            "rejected": "bad"}
+
+
+def _record_header(config: AppConfig, ev: MetricEvidence, pdf: bytes | None) -> None:
+    """Crumb, status and source, the metric's name, the actions, then the four facts."""
+    st.html(f'<div class="bpe-crumb">Reports / {escape(ev.report_label)} / Evidence</div>')
+    title_col, actions_col = st.columns([3, 2], vertical_alignment="bottom")
+    with title_col:
+        chips = style.chip(ev.status_label, EV_CHIPS.get(ev.status, "muted"))
+        if ev.source_type == "calculated" or ev.note_calc is not None:
+            chips += " " + style.chip("Calculated", "calc")
+        st.html(f'<div style="display:flex;gap:6px">{chips}</div>')
+        st.markdown(f"## {esc(ev.display_name)}")
+        st.html(f'<p class="bpe-sub">Excel column: {escape(ev.export_column or "none (Source Evidence only)")} · '
+                f'{escape(ev.report_label)}</p>')
+    with actions_col:
+        copy_col, pdf_col, open_col = st.columns([1, 1.5, 1.2])
+        with copy_col.popover("Copy link", width="stretch"):
+            st.code(evidence_url(config.settings.app_url, ev.document["id"], ev.metric_id), language=None)
+        if pdf_col.button("Download evidence PDF", key="ev_pdf", width="stretch"):
+            generated = datetime.now(timezone.utc).isoformat(timespec="minutes").replace("+00:00", "")
+            st.session_state._ev_pdf = (ev.metric_id, summary_pdf(
+                [([ev], {})], config.settings.app_url, f"Evidence: {ev.display_name} · {ev.report_label}",
+                generated.replace("T", " ")))
+        ready = st.session_state.get("_ev_pdf")
+        if ready and ready[0] == ev.metric_id:
+            pdf_col.download_button("Save PDF", ready[1], file_name=f"evidence_{ev.metric_id}.pdf",
+                                    mime="application/pdf", key="ev_pdf_save", width="stretch")
+        if open_col.button("Open in review", key="ev_open_review", width="stretch"):
+            _open_in_viewer(config, ev, pdf, target="review")
+    if ev.value is None:
+        value, note = ("Not reported", "no value, not zero") if ev.source_type == "not_reported" else ("—", "no value")
+    elif ev.unit == "fraction":
+        value, note = f"{ev.value.normalize():f}", f"{(ev.value * 100).normalize():f}%"
+    else:
+        value, note = ev.value_text, ev.unit or ""
+    pages = ([f"PDF page {i.page}" for i in ev.calc_inputs if i.page] if ev.calc_inputs else
+             [f"PDF page {f.page}" for f in ev.note_calc.figures if f.page] if ev.note_calc else
+             [f"PDF page {ev.page}"] if ev.page else [])
+    approved = ev.approved_by or ev.entered_by or "not approved yet"
+    inputs = len(ev.calc_inputs) if ev.calc_inputs else len(ev.note_calc.figures) if ev.note_calc else 0
+    source = f"Calculated from {inputs} printed figure{'s' if inputs != 1 else ''}" if inputs else ev.source_label
+    when = (ev.approved_at or ev.entered_at or "")[:16].replace("T", " ")
+    style.stat_strip([
+        ("Value", value, note),
+        ("Source", source, " and ".join(dict.fromkeys(pages)) or ""),
+        ("Approved by" if ev.approved_by else "Entered by", approved, f"{when} UTC" if when else ""),
+        ("Report file", ev.document["original_filename"], f"{ev.document['page_count']} pages"),
+    ])
 
 
 def _header(ev: MetricEvidence) -> None:
@@ -460,7 +584,7 @@ def box_origin(ev: MetricEvidence) -> str:
     return "box of the extracted figure"
 
 
-def _open_in_viewer(config: AppConfig, ev: MetricEvidence, pdf: bytes | None) -> None:
+def _open_in_viewer(config: AppConfig, ev: MetricEvidence, pdf: bytes | None, target: str = "extract_review") -> None:
     """Extract & Review on this report, with this metric selected and the viewer on its page and box."""
     error = extract_review.open_saved(config, ev.document["id"])
     if error:
@@ -476,7 +600,7 @@ def _open_in_viewer(config: AppConfig, ev: MetricEvidence, pdf: bytes | None) ->
         fx, fy = focus_of(ev.box, rect.width, rect.height)
         st.session_state.pan_x, st.session_state.pan_y = round(fx * 100), round(fy * 100)
         st.session_state.viewer_zoom = "200%"
-    routes.go("extract_review")
+    routes.go(target)
 
 
 def _checks_block(ev: MetricEvidence) -> None:
@@ -502,11 +626,16 @@ def _candidates_block(ev: MetricEvidence) -> None:
 
 
 def _history_block(ev: MetricEvidence) -> None:
-    st.markdown("#### Review history")
-    st.dataframe(pd.DataFrame([{"When (UTC)": h.at[:16].replace("T", " "), "Who": h.who, "Action": h.action,
-                                "Before": h.old, "After": h.new, "Reason": h.reason} for h in ev.history]),
-                 hide_index=True, width="stretch",
-                 column_config={"Reason": st.column_config.TextColumn(width="large")})
+    st.markdown("#### History")
+    st.html('<ol class="bpe-timeline">' + "".join(
+        f'<li><time>{escape(h.at[:19].replace("T", " "))}</time><span class="dot{" g" if i < len(ev.history) - 1 else ""}">'
+        f'</span><span><b>{escape(h.action)}</b> · {escape(h.who)}{" · " + escape(h.new) if h.new else ""}</span></li>'
+        for i, h in enumerate(ev.history)) + "</ol>")
+    with st.expander("Every step in full"):
+        st.dataframe(pd.DataFrame([{"When (UTC)": h.at[:16].replace("T", " "), "Who": h.who, "Action": h.action,
+                                    "Before": h.old, "After": h.new, "Reason": h.reason} for h in ev.history]),
+                     hide_index=True, width="stretch",
+                     column_config={"Reason": st.column_config.TextColumn(width="large")})
 
 
 # --- Evidence summary ----------------------------------------------------------------------

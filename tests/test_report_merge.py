@@ -182,7 +182,8 @@ def test_bank_reports_shows_the_duplicate_banner_and_merges_on_press(copies, set
     page.session_state["reviewer"] = MERGER
     page.run()
     assert not page.exception
-    assert any("Same PDF saved 2 times" in w.value for w in page.warning)
+    assert any("The same PDF is saved twice" in m.value for m in page.markdown)
+    next(b for b in page.button if b.label == "Review duplicates").click().run()  # shows the merge
     assert next(r for r in page.radio if r.label == "Copy to keep").value == second
     with closing(connect(db_path)) as conn:
         assert len(list_documents(conn)) == 2  # shown, nothing changed
@@ -193,4 +194,4 @@ def test_bank_reports_shows_the_duplicate_banner_and_merges_on_press(copies, set
     with closing(connect(db_path)) as conn:
         assert [d["id"] for d in list_documents(conn)] == [first]
         assert len(semantics(conn, first)) == 6
-    assert not any("Same PDF saved" in w.value for w in page.warning)
+    assert not any("The same PDF is saved" in m.value for m in page.markdown)

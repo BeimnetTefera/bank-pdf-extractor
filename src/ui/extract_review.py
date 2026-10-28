@@ -16,7 +16,7 @@ import io
 import json
 from collections.abc import Callable
 from contextlib import closing
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -197,6 +197,61 @@ def render(config: AppConfig, open_calculations: Callable[[str], None] | None = 
     with detail_col:
         _metric_steps(shown_ids, analysis, extraction, marked_values, ctx)  # always in view, above the decision
         _details_panel(extraction, analysis, selected, ctx, states, store)
+
+
+@dataclass
+class Prepared:
+    """Everything the Review page draws from, worked out without drawing anything (D-092)."""
+
+    doc: dict
+    extraction: ExtractionResult
+    analysis: AnalysisResult
+    ocr_words: ocr.OcrWords
+    ocr_needed: list[int]
+    ocr_missing: list[int]
+    ocr_engine: ocr.OcrEngine | None
+    ocr_path: Path
+    ctx: ReviewContext
+    states: dict[str, ReviewState]
+    marked_values: dict[str, tuple[int, tuple]]
+    calc_boxes: dict[str, list[tuple[int, tuple, str]]]
+    recorded: dict[str, tuple[int, tuple, str]]
+    check_results: list[cross_checks.CheckResult]
+
+
+def prepare(config: AppConfig, doc: dict) -> Prepared:
+    """The saved report's figures, decisions and boxes, as on this page, for the Review page."""
+    needed = _pages_needing_ocr(doc["sha"], doc["bytes"])
+    tesseract_dir = config.settings.tesseract_dir
+    engine = _ocr_engine(str(tesseract_dir) if tesseract_dir else None) if needed else None
+    path = ocr.cache_path(config.settings, doc["sha"])
+    ocr_words = {p: w for p, w in ocr.load_cache(path).items() if p in needed}
+    extraction = _extract(doc["sha"], tuple(sorted(ocr_words)), doc["bytes"], ocr_words,
+                          engine.version if engine else "")
+    metric_ids = tuple(st.session_state.metric_selection)
+    fingerprint = hashlib.sha256(repr((config.metrics, config.mappings, config.learned_aliases)).encode()).hexdigest()
+    analysis = _analyse(doc["sha"], st.session_state.period, st.session_state.bank or "", metric_ids, fingerprint,
+                        extraction, config)
+    ctx, states = _review_context(config, doc, analysis, extraction, prompt=False)
+    marked_values = _marked_values(states)
+    calc_boxes = _calculation_boxes(ctx, states)
+    ctx = replace(ctx, note_calcs={metric_id: _named_inputs(extraction, calc)
+                                   for metric_id, calc in _note_calculations(doc, states).items()})
+    for metric_id, calc in ctx.note_calcs.items():
+        marked_values.pop(metric_id, None)
+        inputs = [(f.page - 1, tuple(f.box), f.label or "input") for f in calc.figures if f.page and f.box]
+        if inputs:
+            calc_boxes[metric_id] = inputs
+    for metric_id, inputs in calc_boxes.items():
+        marked_values.setdefault(metric_id, (inputs[0][0] + 1, inputs[0][1]))
+    recorded = _recorded_boxes(ctx, analysis, states)
+    for calculated in ctx.note_calcs:
+        recorded.pop(calculated, None)
+    with closing(connect(config.settings.database_path)) as conn:
+        check_results = cross_checks.run_checks(conn, config.checks, analysis, states, ctx.candidate_ids,
+                                                st.session_state.bank or "", st.session_state.period or "")
+    return Prepared(doc, extraction, analysis, ocr_words, needed, [p for p in needed if p not in ocr_words], engine,
+                    path, ctx, states, marked_values, calc_boxes, recorded, check_results)
 
 
 def _report_year_label() -> str:
@@ -402,7 +457,7 @@ def open_saved(config: AppConfig, document_id: str) -> str | None:
 
 
 def _review_context(config: AppConfig, doc: dict, analysis: AnalysisResult,
-                    extraction: ExtractionResult) -> tuple[ReviewContext | None, dict[str, ReviewState]]:
+                    extraction: ExtractionResult, prompt: bool = True) -> tuple[ReviewContext | None, dict[str, ReviewState]]:
     document_id = doc.get("document_id")
     if not document_id:
         return None, {}
@@ -424,7 +479,8 @@ def _review_context(config: AppConfig, doc: dict, analysis: AnalysisResult,
     ctx = ReviewContext(config.settings.database_path, document_id, ids, st.session_state.reviewer,
                         extraction.page_count, st.session_state.get("viewer_page", 1), finished, show_box,
                         config=config)
-    _new_figures_prompt(ctx, new, analysis, extraction, saved_version)
+    if prompt:
+        _new_figures_prompt(ctx, new, analysis, extraction, saved_version)
     return ctx, states
 
 

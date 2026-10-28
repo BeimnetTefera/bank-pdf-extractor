@@ -8,6 +8,7 @@ from streamlit.testing.v1 import AppTest
 from src import review_service
 from src.database import connect
 from src.project_service import load_candidates
+from tests.conftest import html_text
 from tests.test_app_review import (  # noqa: F401 (app is a fixture)
     APP,
     TOTAL_ASSETS_KEY,
@@ -49,9 +50,9 @@ def test_evidence_page_shows_value_source_note_and_history(app):
     approve_total_assets(app, document_id)
     at = screen(app, report=document_id, metric="total_assets_etb")
     assert not at.exception
-    text = " ".join(m.value for m in at.markdown) + " ".join(c.value for c in at.caption)
+    text = " ".join(m.value for m in at.markdown) + " ".join(c.value for c in at.caption) + html_text(at)
     assert "1,234,567,000 ETB" in text and "PDF page 1" in text
-    assert "Approved by **Analyst A**" in text
+    assert "Approved by" in text and "Analyst A" in text
     assert any("Statement of financial position" in t.value for t in at.text)  # the note in full
     assert "Approved" in text and "PDF figure" in text  # status and source badges
     history = at.dataframe[-1].value
@@ -100,7 +101,7 @@ def test_address_form_with_page_parameter_opens_the_evidence_page(app):
     at.query_params["metric"] = "total_assets_etb"
     at.run()
     assert not at.exception
-    assert any(m.value == "## Evidence" for m in at.markdown)
+    assert any(m.value == "## Total assets" for m in at.markdown)  # the record itself, named in the address
 
 
 def test_metric_details_link_to_the_evidence_page(app):

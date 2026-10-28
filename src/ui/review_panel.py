@@ -403,10 +403,10 @@ def _pending_box(ctx: ReviewContext, result: MetricResult, state: ReviewState) -
     _reopen(ctx, metric_id, f"Withdraw {kind.lower()}")
 
 
-def _not_reported(ctx: ReviewContext, result: MetricResult) -> None:
+def _not_reported(ctx: ReviewContext, result: MetricResult, label: str = "Not reported") -> None:
     """Record that the report does not disclose this metric (D-053): not Not found, not zero."""
     metric_id = result.metric.id
-    with st.popover("Not reported", icon=":material/do_not_disturb_on:", width="stretch",
+    with st.popover(label, icon=":material/do_not_disturb_on:", width="stretch",
                     help="The report does not disclose this figure. Different from Not found and from zero."):
         st.caption("Use this when you have looked and the report does not give the figure. It is exported as a "
                    "blank cell with your reason, never as zero.")

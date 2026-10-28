@@ -15,7 +15,7 @@ from src.database import connect
 from src.page_marks import Mark
 from src.project_service import load_candidates
 from src.unit_normalizer import UnitEvidence
-from tests.conftest import make_pdf
+from tests.conftest import html_text, make_pdf
 from tests.test_app_evidence import screen
 
 APP = Path(__file__).resolve().parent.parent / "app.py"
@@ -88,10 +88,9 @@ def test_calculate_roe_approve_and_see_its_evidence(app):
 
     page = screen(app, report=app.document_id, metric="roe_percent")
     assert not page.exception
-    shown = " ".join(m.value for m in page.markdown) + " ".join(c.value for c in page.caption)
-    assert "Calculated (formula)" in shown and "green boxes" in shown and "PDF page 1" in shown
-    assert any("roe_percent = profit_after_tax_etb / avg(" in c.value for c in page.code)
-    assert list(page.dataframe[0].value["Input"]) == ["Profit after tax", "Total equity", "Total equity (previous year)"]
+    shown = " ".join(m.value for m in page.markdown) + " ".join(c.value for c in page.caption) + html_text(page)
+    assert "How the value was worked out" in shown and "Calculated from 3 printed figures" in shown
+    assert "PDF page 1" in shown and "Profit after tax" in shown and "Total equity" in shown
     assert "Calculated with a formula" in list(page.dataframe[-1].value["Action"])
 
 

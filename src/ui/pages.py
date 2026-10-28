@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from collections.abc import Callable
 from contextlib import closing
@@ -19,7 +20,7 @@ from src.database import connect
 from src.evidence import format_value
 from src.excel_exporter import fiscal_year_label, report_years
 from src.mapping_editor import KINDS, MappingEditError, add_wording, list_wording, remove_wording
-from src.project_service import list_documents, recent_decisions
+from src.project_service import list_documents
 from src.ui import routes, style
 from src.ui.export_panel import export_button
 
@@ -57,59 +58,60 @@ def home() -> None:
         st.code(TESTER_PROMPT.read_text(encoding="utf-8"), language="markdown", wrap_lines=True)
 
 
-REPORT_COLUMNS = [2.9, 1.0, 1.8, 1.5, 1.6, 1.0, 0.6]  # bank, year, progress, work left, status, open, more
+REPORT_COLUMNS = [3.0, 1.0, 0.7, 1.7, 1.8, 1.2, 0.9]  # bank, fiscal year, pages, progress, work left, status, open
 
 
 def bank_reports(config: AppConfig, open_report: Callable[[str], str | None],
-                 new_report: Callable[[], None] | None = None) -> None:
-    """Reports, the home of the redesign (D-090): what is saved, how far each review is, what is left."""
+                 new_report: Callable[[], None] | None = None,
+                 open_calculations: Callable[[str], None] | None = None) -> None:
+    """Reports, the home of the redesign mockup (D-092): what is saved, how far each review is, what is left."""
     with closing(connect(config.settings.database_path)) as conn:
         documents = list_documents(conn)
         progress = {d["id"]: len(review_service.approved_results(conn, d["id"])) for d in documents}
         finished = {d["id"]: review_service.extraction_status(conn, d["id"]).finished for d in documents}
         work = {d["id"]: bulk_review.outstanding_work(conn, d["id"], config) for d in documents}
+        not_reported = {d["id"]: sum(review_service.review_state(conn, d["id"], m).status == "not_reported"
+                                     for m in json.loads(d["metric_ids"])) for d in documents}
         years = report_years(conn)
-        activity = recent_decisions(conn, tuple(ACTIVITY_VERBS))
     _reports_header(config, years, new_report)
     if not documents:
-        st.info("No reports saved yet. Press **New report**, upload a PDF and press Save report.",
-                icon=":material/inbox:")
+        st.info("No reports saved yet. Press **New report** to upload an annual report.", icon=":material/inbox:")
         return
     totals = {d["id"]: len(json.loads(d["metric_ids"])) for d in documents}
     copies = Counter(d["sha256"] for d in documents)
     ready = [d for d in documents if finished[d["id"]]]
     waiting = [d for d in documents if work[d["id"]].count]
     approved, total = sum(progress.values()), sum(totals.values())
+    banks = len({bank_key(d["bank_name"]) for d in documents})
     style.stat_strip([
-        ("Saved reports", str(len(documents)),
-         f"{len({bank_key(d['bank_name']) for d in documents})} bank(s) · {len(years)} fiscal year(s)"),
+        ("Saved reports", str(len(documents)), f"{_plural(banks, 'bank')} · {_plural(len(years), 'fiscal year')}"),
         ("Figures approved", f"{approved} / {total}", f"{round(100 * approved / total) if total else 0}% of all metrics"),
-        ("Waiting for review", str(sum(work[d["id"]].count for d in documents)), f"across {len(waiting)} report(s)"),
+        ("Waiting for review", str(sum(work[d["id"]].count for d in documents)),
+         f"across {_plural(len(waiting), 'report')}"),
         ("Ready for calculations", str(len(ready)),
          ", ".join(f"{d['bank_name']} {_year(d)}" for d in ready) or "none yet"),
     ])
-    _fix_names_and_years(config)
     _duplicates(config)
-    table_col, feed_col = st.columns([3.6, 1], gap="medium")
-    with table_col, st.container(key="panel_reports"):
-        with st.container(key="reports_head"):
-            head = st.columns(REPORT_COLUMNS, vertical_alignment="center")
-            for col, title in zip(head, ("Bank", "Year", "Progress", "Work left", "Status")):
+    with st.container(key="panel_table_reports"):
+        with st.container(key="thead_reports"):
+            for col, title in zip(st.columns(REPORT_COLUMNS, vertical_alignment="center"),
+                                  ("Bank", "Fiscal year", "Pages", "Progress", "Work left", "Status")):
                 col.markdown(title)
         for d in documents:
-            _report_row(config, d, progress[d["id"]], totals[d["id"]], finished[d["id"]], copies[d["sha256"]] > 1,
-                        work[d["id"]], open_report)
-    with feed_col, st.container(key="panel_activity"):
-        _activity(config, activity)
-    _deletion_log(config)
+            _report_row(config, d, progress[d["id"]], totals[d["id"]], not_reported[d["id"]], finished[d["id"]],
+                        copies[d["sha256"]] > 1, work[d["id"]], open_report, open_calculations)
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}" + ("" if n == 1 else "s")
 
 
 def _reports_header(config: AppConfig, years: list[int], new_report: Callable[[], None] | None) -> None:
-    title_col, export_col, new_col = st.columns([6, 1.1, 1.3], vertical_alignment="bottom")
+    title_col, export_col, new_col = st.columns([6, 1.5, 1.3], vertical_alignment="bottom")
     title_col.markdown("## Reports")
-    title_col.caption(f"Annual reports saved for review, newest first · stored in {config.settings.data_dir}")
+    title_col.html('<p class="bpe-sub">Annual reports saved for review, newest first.</p>')
     if years:  # every saved report has a recognisable year (Save requires one)
-        with export_col.popover("Export", icon=":material/download:", width="stretch"):
+        with export_col.popover("Export to Excel", icon=":material/download:", width="stretch"):
             st.markdown("**Export to Excel** · one workbook per fiscal year, with every bank saved for that year")
             end_year = st.selectbox("Fiscal year", years, format_func=fiscal_year_label, key="export_year")
             export_button(config, end_year, key=f"export_{end_year}")
@@ -117,28 +119,28 @@ def _reports_header(config: AppConfig, years: list[int], new_report: Callable[[]
         new_col.button("New report", icon=":material/add:", type="primary", width="stretch", on_click=new_report)
 
 
-def _report_row(config: AppConfig, d, approved: int, total: int, finished: bool, duplicate: bool,
-                work: bulk_review.OutstandingWork, open_report: Callable[[str], str | None]) -> None:
-    with st.container(key=f"report_row_{d['id']}"):
-        bank, year, progress, left, status, open_col, more_col = st.columns(REPORT_COLUMNS, vertical_alignment="center")
-        bank.markdown(f"**{d['bank_name']}**")
-        bank.html(f'<div class="bpe-file">{escape(d["original_filename"])} · {d["page_count"]} pages</div>')
+def _report_row(config: AppConfig, d, approved: int, total: int, not_reported: int, finished: bool, duplicate: bool,
+                work: bulk_review.OutstandingWork, open_report: Callable[[str], str | None],
+                open_calculations: Callable[[str], None] | None) -> None:
+    with st.container(key=f"trow_{d['id']}"):
+        bank, year, pages_col, progress, left, status, action = st.columns(REPORT_COLUMNS, vertical_alignment="center")
+        bank.html(f'<b style="font-weight:500">{escape(d["bank_name"])}</b>'
+                  f'<div class="bpe-file">{escape(d["original_filename"])}</div>')
         year.html(f'<span class="bpe-num">{escape(_year(d))}</span>')
-        progress.progress(approved / total if total else 0.0, text=f"{approved} of {total} approved")
-        left.caption(_work_text(config, work))
-        if finished:
-            status.badge("Finished", color="green", icon=":material/task_alt:")
-        elif duplicate:
-            status.badge("Duplicate", color="gray", icon=":material/content_copy:")
-        else:
-            status.badge("In review", color="orange")
-        if open_col.button("Open", key=f"open_{d['id']}", type="primary", width="stretch"):
+        pages_col.html(f'<span class="bpe-num">{d["page_count"]}</span>')
+        count = f"{approved} of {total}" + (f" · {not_reported} not reported" if not_reported else "")
+        progress.html(style.bar((approved + not_reported) / total if total else 0.0)
+                      + f'<div class="bpe-minor bpe-num">{escape(count)}</div>')
+        left.html(f'<span class="bpe-minor">{escape(_work_text(config, work))}</span>')
+        kind, label = ("ok", "Finished") if finished else ("muted", "Duplicate") if duplicate else ("warn", "In review")
+        status.html(style.chip(label, kind))
+        if finished and open_calculations is not None:
+            action.button("Calculate", key=f"open_{d['id']}", width="stretch", on_click=open_calculations,
+                          args=(d["id"],))
+        elif action.button("Open", key=f"open_{d['id']}", width="stretch"):
             error = open_report(d["id"])
             if error:
                 st.error(error, icon=":material/error:")
-        with more_col:
-            _delete_report(config, d, approved)
-        _work_left(config, d["id"], work, open_report)
 
 
 def _work_text(config: AppConfig, work: bulk_review.OutstandingWork) -> str:
@@ -148,34 +150,6 @@ def _work_text(config: AppConfig, work: bulk_review.OutstandingWork) -> str:
     names = {m.id: m.display_name for m in config.metrics}
     metric_ids = [*work.corrections, *work.calculations, *work.not_reviewed]
     return ", ".join(names.get(m, m) for m in metric_ids) if work.count <= 2 else f"{work.count} metrics"
-
-
-def _activity(config: AppConfig, decisions) -> None:
-    st.markdown("**Recent activity**")
-    if not decisions:
-        st.caption("No review decisions yet.")
-        return
-    names = {m.id: m.display_name for m in config.metrics}
-    events = []
-    for r in decisions:
-        what = ACTIVITY_VERBS.get(r["decision"], r["decision"].replace("_", " "))
-        value = (f" · {format_value(Decimal(r['reviewed_value']), r['reviewed_unit'])}"
-                 if r["reviewed_value"] is not None and r["decision"] == "approved" else "")
-        events.append(
-            f'<div class="bpe-event"><span class="bpe-avatar">{escape(style.initials(r["reviewer"]))}</span><span>'
-            f'<b>{escape(r["reviewer"])}</b> {what} <b>{escape(names.get(r["metric_id"], r["metric_id"]))}</b>'
-            f'{escape(value)}<br><span class="bpe-when">{escape(r["bank_name"])} {escape(_year(r))} · '
-            f'{escape(_short_time(r["created_at"]))}</span></span></div>')
-    st.html("".join(events))
-
-
-ACTIVITY_VERBS = {"approved": "approved", "rejected": "rejected", "reopened": "reopened"}
-
-
-def _short_time(iso: str) -> str:
-    """'2026-10-26T07:52:03+00:00' -> '26 Oct, 07:52 UTC'."""
-    when = datetime.fromisoformat(iso)
-    return f"{when.day} {when:%b}, {when:%H:%M} UTC"
 
 
 def _year(d) -> str:
@@ -243,11 +217,21 @@ def _run_fix(config: AppConfig, action: Callable, done: str) -> None:
 
 
 def _duplicates(config: AppConfig) -> None:
-    """One banner per PDF saved more than once, with Merge (D-086). Nothing changes until Merge is pressed."""
+    """One line per PDF saved more than once; Review duplicates shows the merge (D-086) below it."""
     with closing(connect(config.settings.database_path)) as conn:
-        groups = report_merge.duplicate_groups(conn)
-        for group in groups:
-            _duplicate_group(config, conn, group)
+        for group in report_merge.duplicate_groups(conn):
+            first = group.documents[0]
+            with st.container(key=f"notice_{group.sha256[:12]}"):
+                text_col, button_col = st.columns([6, 1.3], vertical_alignment="center")
+                times = {2: "twice"}.get(len(group.documents), f"{len(group.documents)} times")
+                text_col.markdown(f":orange[:material/warning:] **The same PDF is saved {times}:** "
+                                  f"{first['bank_name']} {_year(first)}. Merging keeps the copy with more decisions.")
+                key = f"show_merge_{group.sha256}"
+                if button_col.button("Review duplicates", key=f"review_dups_{group.sha256[:12]}", width="stretch"):
+                    st.session_state[key] = not st.session_state.get(key, False)
+            if st.session_state.get(key):
+                with st.container(key=f"panel_merge_{group.sha256[:12]}"):
+                    _duplicate_group(config, conn, group)
 
 
 def _duplicate_group(config: AppConfig, conn, group: report_merge.DuplicateGroup) -> None:
@@ -263,9 +247,7 @@ def _duplicate_group(config: AppConfig, conn, group: report_merge.DuplicateGroup
         return ", ".join(names.get(m, m) for m in metric_ids)
 
     ids = [d["id"] for d in group.documents]
-    st.warning(f"**Same PDF saved {len(ids)} times** · {group.documents[0]['original_filename']}. Merging keeps "
-               "the copy with more decisions.", icon=":material/content_copy:")
-    with st.expander("Review duplicates", icon=":material/merge:"):
+    with st.container():
         keep = st.radio("Copy to keep", ids, index=ids.index(group.default_keep), format_func=label,
                         key=f"merge_keep_{group.sha256}")
         others = [i for i in ids if i != keep]
@@ -369,46 +351,76 @@ def _deletion_log(config: AppConfig) -> None:
 
 
 def templates(config: AppConfig) -> None:
+    """Templates, as in the redesign mockup (D-092): what the app looks for, how it names it, where it goes."""
     st.markdown("## Templates")
+    st.html('<p class="bpe-sub">What the app looks for in a report, how it names it, and where it goes in the '
+            'Excel export.</p>')
     template = config.export_template
-    metrics_tab, wording_tab, layout_tab = st.tabs([f"Metrics ({len(config.metrics)})", "Wording",
-                                                    f"Excel layout ({len(template.columns)} columns)"])
+    metrics_tab, wording_tab, calc_tab, layout_tab = st.tabs(
+        [f"Metrics {len(config.metrics)}", "Wording", f"Calculated columns {len(template.calculated)}", "Excel layout"])
+    with metrics_tab, st.container(key="panel_table_metrics"):
+        with st.container(key="thead_metrics_tools"):
+            find_col, hint_col = st.columns([2, 3], vertical_alignment="center")
+            found = find_col.text_input("Find a metric", key="templates_find", placeholder="Find a metric",
+                                        label_visibility="collapsed", icon=":material/search:")
+            hint_col.html('<p class="bpe-minor" style="text-align:right;margin:0">Changes are saved to the '
+                          'configuration with your name.</p>')
+        shown = [m for m in config.metrics if not found or found.casefold() in m.display_name.casefold()]
+        st.html(_metrics_table(shown))
     with wording_tab:
         wording_editor(config)
-    with metrics_tab:
-        st.caption(
-            f"Metrics from config/metrics.yaml: {len(config.active_metrics())} active of {len(config.metrics)}. "
-            "Edit the YAML file to change them."
-        )
-        st.dataframe(
-            [
-                {
-                    "Metric": m.display_name,
-                    "Excel column": m.export_column or "— (Source Evidence only)",
-                    "Pipeline column": m.shega_column or "—",
-                    "Unit": m.expected_unit,
-                    "Active": m.active,
-                    "Definition": m.definition,
-                    "Notes": m.notes or "",
-                }
-                for m in config.metrics
-            ],
-            hide_index=True,
-            width="stretch",
-            height=700,
-        )
+    with calc_tab:
+        st.html(_calculated_table(config))
     with layout_tab:
         rows = excel_layout(config)
         st.caption(
             f"The Approved Data sheet of the Excel export, column by column, from config/export_template.yaml "
-            f"(the Shega bank timeseries spreadsheet): {len(template.extracted())} extracted columns, reviewed in "
-            f"Extract & Review, and {len(template.calculated)} calculated columns, entered by an analyst on the "
-            "Calculations page after the extraction review is finished."
+            f"(the Shega bank timeseries spreadsheet): {len(template.extracted())} extracted columns and "
+            f"{len(template.calculated)} calculated columns."
         )
         group = st.segmented_control("Show", ["All", "Extracted", "Calculated"], default="All", key="layout_group")
-        shown = [r for r in rows if group in (None, "All") or r["Group"] == group]
-        st.dataframe(shown, hide_index=True, width="stretch", height=700,
+        shown_rows = [r for r in rows if group in (None, "All") or r["Group"] == group]
+        st.dataframe(shown_rows, hide_index=True, width="stretch", height=700,
                      column_config={"#": st.column_config.NumberColumn(width=40)})
+
+
+def _metrics_table(metrics) -> str:
+    """Metric, unit, Excel column, standard formula and status, as one HTML table."""
+    rows = []
+    for m in metrics:
+        if m.formula:
+            formula = f'<code class="bpe-code">{escape(readable_formula(m.formula))}</code>'
+        else:
+            formula = f'<span class="bpe-minor">{"printed" if m.active else "not used"}</span>'
+        column = escape(m.export_column) if m.export_column else '<span class="bpe-minor">none</span>'
+        status = style.chip("Active", "ok") if m.active else style.chip("Inactive", "muted")
+        rows.append(f"<tr><td>{escape(m.display_name)}</td><td>{escape(m.expected_unit)}</td><td>{column}</td>"
+                    f"<td>{formula}</td><td>{status}</td></tr>")
+    return ('<div class="bpe-tablebox"><table class="bpe-table"><thead><tr><th>Metric</th><th>Unit</th>'
+            '<th>Excel column</th><th>Standard formula</th><th>Status</th></tr></thead><tbody>'
+            + "".join(rows) + "</tbody></table></div>")
+
+
+def _calculated_table(config: AppConfig) -> str:
+    """The calculated columns with their draft formula (D-088)."""
+    rows = []
+    for column in config.export_template.calculated:
+        f = config.export_template.formula(column)
+        formula = f'<code class="bpe-code">{escape(readable_formula(f.formula))}</code>' if f else "none"
+        unit = escape(f.unit) if f else ""
+        compare = escape(f.compare_with) if f and f.compare_with else ""
+        rows.append(f"<tr><td>{escape(column)}</td><td>{formula}</td><td>{unit}</td><td>{compare}</td></tr>")
+    return ('<div class="bpe-tablebox"><table class="bpe-table bpe-panel-table"><thead><tr><th>Calculated column</th>'
+            '<th>Formula (draft)</th><th>Unit</th><th>Compared with</th></tr></thead><tbody>'
+            + "".join(rows) + "</tbody></table></div>")
+
+
+def readable_formula(formula: str) -> str:
+    """'profit_after_tax_etb / avg(total_equity_etb, total_equity_etb_prev)' ->
+    'profit_after_tax ÷ avg(total_equity, last year)'."""
+    text = re.sub(r"\b[a-z0-9_]+_prev\b", "last year", formula)
+    text = re.sub(r"_etb\b", "", text)
+    return text.replace(" / ", " ÷ ").replace(" * ", " × ").replace(" - ", " − ")
 
 
 def wording_editor(config: AppConfig) -> None:
@@ -489,25 +501,35 @@ def excel_layout(config: AppConfig) -> list[dict]:
 
 
 def settings(config: AppConfig) -> None:
+    """Settings: your name, and how this copy of the app is set up (from config/settings.yaml)."""
     s = config.settings
     st.markdown("## Settings")
-    st.caption("From config/settings.yaml. Edit the file and reload to change them.")
-    with st.container(border=True):
-        st.markdown(f"**Data folder**  \n`{s.data_dir}`")
-        st.markdown(f"**Upload limit**  \n{s.max_upload_mb} MB, {s.max_pages} pages")
-        st.markdown(f"**Reviewer name**  \n{s.default_reviewer}")
+    st.html('<p class="bpe-sub">Your name, and how this copy of the app is set up.</p>')
+    name_col, system_col = st.columns([1, 1.6], gap="medium")
+    with name_col, st.container(key="panel_name"):
+        st.markdown("**Your name**")
+        st.session_state.setdefault("reviewer_input", st.session_state.get("reviewer", ""))
+        st.text_input("Reviewer", key="reviewer_input", on_change=_set_reviewer,
+                      help="Saved with every review decision. No login in this prototype.")
+        st.caption("Saved with every decision you make.")
+    with system_col, st.container(key="panel_system"):
+        st.markdown("**System**")
+        engine = ocr.find_engine(s.tesseract_dir)
+        ocr_text = (f"{engine.version} · runs on this computer" if engine is not None
+                    else "Tesseract not found. Install it, or set tesseract_dir.")
         per_bank: dict[str, int] = {}
         for a in config.learned_aliases:
             per_bank[a.bank or "every bank"] = per_bank.get(a.bank or "every bank", 0) + 1
         learned = ", ".join(f"{bank}: {n}" for bank, n in sorted(per_bank.items())) or "none yet"
-        st.markdown(f"**Label aliases configured**  \n{len(config.mappings)} metric entries in mappings.yaml "
-                    f"(every bank). Labels learned from reviews, per bank (config/{config.learned_aliases_path.name}): "
-                    f"{learned}")
-        st.markdown(f"**Cross-checks**  \n{len(config.checks)} sum check(s) from config/checks.yaml, plus "
-                    "the prior-year comparison with last year's approved figures")
-        engine = ocr.find_engine(s.tesseract_dir)
-        if engine is None:
-            st.markdown("**OCR (for picture pages)**  \nTesseract not found. Install it, or set `tesseract_dir`.")
-        else:
-            st.markdown(f"**OCR (for picture pages)**  \n{engine.version} · `{engine.executable.parent}` · runs "
-                        "on this computer")
+        rows = [("Text recognition (OCR)", ocr_text), ("Data folder", str(s.data_dir)),
+                ("Largest upload", f"{s.max_upload_mb} MB, {s.max_pages} pages"),
+                ("Evidence links open at", s.app_url or "this computer"),
+                ("Wording", f"{len(config.mappings)} metric entries in mappings.yaml; learned per bank: {learned}"),
+                ("Cross-checks", f"{len(config.checks)} sum check(s) from config/checks.yaml, plus the prior-year "
+                                 "comparison")]
+        st.html("".join(f'<div class="bpe-kv"><span>{escape(k)}</span><span>{escape(v)}</span></div>' for k, v in rows))
+        st.caption("From config/settings.yaml. Edit the file and reload to change them.")
+
+
+def _set_reviewer() -> None:
+    st.session_state.reviewer = st.session_state.reviewer_input.strip()

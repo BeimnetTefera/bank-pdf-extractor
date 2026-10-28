@@ -12,6 +12,7 @@ import sqlite3
 from collections.abc import Callable
 from contextlib import closing
 from decimal import Decimal
+from html import escape
 
 import pandas as pd
 import streamlit as st
@@ -23,178 +24,202 @@ from src.database import connect
 from src.excel_exporter import fiscal_year_label
 from src.project_service import list_documents
 from src.review_service import ApprovedResult, ReviewError
+from src.ui import routes, style
+
+
+# The 26 columns in groups, as in the redesign mockup (screen 5, D-092).
+GROUPS = (
+    ("Profit and per share", ("Profit Before Tax (Calculated)", "Profit After Tax (Calculated)",
+                              "Basic Earning per 1 share (EPS) (Calculated)", "Return on Assets (ROA) (Calculated)",
+                              "Return on Equity (ROE) (Calculated)")),
+    ("Balance sheet", ("Average Total Asset", "Deposit Growth Rate")),
+    ("Efficiency and profitability", ("Cost to Income Ratio", "Net Interest Margin", "Asset Utilization Ratio",
+                                      "Profit Margin")),
+    ("Dividends", ("Dividend Payout Ratio (Dividends Paid/Net Profit)",
+                   "Dividend Payout Ratio (Dividends paid/Total deposits)")),
+    ("Liquidity, capital and leverage", ("Loan-to-Deposit Ratio", "Liquidity Ratio", "Capital Adequacy Ratio",
+                                         "Leverage Ratio", "Equity-to-Asset Ratio")),
+)
+BLANK = "<span>&nbsp;</span>"  # st.html refuses an empty cell
+COLUMNS = [2.5, 2.5, 1.5, 1.3, 1.5, 1.3, 1.1]  # column, formula, auto, printed, difference, entered, action
+TABS = {"all": "All", "ready": "Ready", "missing": "Needs input", "differences": "Differences"}
 
 
 def render(config: AppConfig, open_report: Callable[[str], str | None]) -> None:
-    st.markdown("## Calculations")
-    st.caption("Work out the calculated columns from a report's approved figures and enter them with a note on "
-               "the formula. The app proposes an auto value from a draft formula; check it before accepting.")
     with closing(connect(config.settings.database_path)) as conn:
         documents = {d["id"]: d for d in list_documents(conn)}
         status = {document_id: review_service.extraction_status(conn, document_id) for document_id in documents}
+    title_col, picker_col = st.columns([3, 1.6], vertical_alignment="bottom")
+    title_col.markdown("## Calculations")
+    title_col.html('<p class="bpe-sub">The 26 calculated columns, worked out from a report\'s approved figures. '
+                   'You accept or override each one.</p>')
     if not documents:
-        st.info("No reports saved yet. Review a report in Extract & Review first.", icon=":material/inbox:")
+        st.info("No reports saved yet. Review a report first.", icon=":material/inbox:")
         return
-
     if st.session_state.get("calc_document") not in documents:
-        st.session_state.calc_document = next(iter(documents))
-    document_id = st.selectbox(
+        ready = [i for i in documents if status[i].finished]
+        st.session_state.calc_document = ready[0] if ready else next(iter(documents))
+    document_id = picker_col.selectbox(
         "Report", list(documents), key="calc_document",
-        format_func=lambda i: f"{documents[i]['bank_name']} · {_year(documents[i])} · "
-                              + ("ready for calculations" if status[i].finished else "extraction not finished"),
-    )
-    doc, state = documents[document_id], status[document_id]
-    if not state.finished:
-        st.info("The extraction review of this report is not finished yet. Finish it in Extract & Review "
-                "(button under the metric table); the calculated columns open after that.",
-                icon=":material/hourglass_top:")
-        if st.button("Open in Extract & Review", icon=":material/fact_check:"):
-            error = open_report(document_id)
-            if error:
-                st.error(error, icon=":material/error:")
-        return
-
-    status_col, reopen_col = st.columns([4, 1], vertical_alignment="center")
-    status_col.success(f"Extraction review finished by {state.reviewer} · {state.at[:16].replace('T', ' ')} UTC"
-                       + (f" · “{state.reason}”" if state.reason else ""), icon=":material/task_alt:")
-    with reopen_col:
-        _reopen(config, document_id)
-
-    figures_col, calculated_col = st.columns([2, 3], gap="medium")
+        format_func=lambda i: f"{documents[i]['bank_name']} · {_year(documents[i])}"
+                              + ("" if status[i].finished else " (review not finished)"))
+    state = status[document_id]
     with closing(connect(config.settings.database_path)) as conn:
-        with figures_col:
-            _approved_figures(conn, config, doc)
-        with calculated_col:
-            _calculated_editor(conn, config, document_id)
-
-
-# --- left: the approved figures to calculate from -------------------------------------------
-
-def _approved_figures(conn: sqlite3.Connection, config: AppConfig, doc: sqlite3.Row) -> None:
+        autos = calculation_service.auto_values(conn, config, document_id)
+        current = calculation_service.current_values(conn, document_id)
     template = config.export_template
-    current = _by_column(config, review_service.approved_results(conn, doc["id"]))
-    previous_doc = _previous_year_report(conn, doc)
-    previous = _by_column(config, review_service.approved_results(conn, previous_doc["id"])) if previous_doc else {}
-
-    st.markdown(f"**Approved figures** · {doc['bank_name']} {_year(doc)}")
-    rows = []
-    for column in (*template.extracted(), *sorted(set(current) - set(template.extracted()))):
-        row = {"Figure": column, "Value": _show(current.get(column))}
-        if previous_doc is not None:
-            row[f"Previous year ({_year(previous_doc)})"] = _show(previous.get(column))
-        rows.append(row)
-    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch", height=640)
-    if previous_doc is None:
-        st.caption("No saved report for this bank's previous year, so growth and averages need the previous "
-                   "year's figures from the dataset.")
-    st.caption("ETB in full Birr; percentages as decimals (0.29 = 29%). Blank = not approved.")
-
-
-def _by_column(config: AppConfig, results: list[ApprovedResult]) -> dict[str, ApprovedResult]:
-    """Approved results keyed by their Excel column (or the metric name when it has none)."""
-    keyed = {}
-    for r in results:
-        try:
-            metric = config.metric(r.metric_id)
-            keyed[metric.export_column or f"{metric.display_name} (not an Excel column)"] = r
-        except KeyError:
-            keyed[r.metric_id] = r
-    return keyed
-
-
-def _previous_year_report(conn: sqlite3.Connection, doc: sqlite3.Row) -> sqlite3.Row | None:
-    end_year = report_end_year(doc["reporting_period"])
-    if end_year is None:
-        return None
-    candidates = [d for d in list_documents(conn)  # newest first
-                  if d["bank_name"].casefold() == doc["bank_name"].casefold()
-                  and report_end_year(d["reporting_period"]) == end_year - 1]
-    return candidates[0] if candidates else None
-
-
-def _show(result: ApprovedResult | None) -> str:
-    if result is None:
-        return ""
-    if result.unit == "fraction":
-        return f"{result.value.normalize():f} ({(result.value * 100).normalize():f}%)"
-    return f"{result.value:,}"
-
-
-# --- right: the calculated columns -------------------------------------------------------
-
-def _calculated_editor(conn: sqlite3.Connection, config: AppConfig, document_id: str) -> None:
-    template = config.export_template
-    history = calculation_service.history(conn, document_id)
-    current = calculation_service.current_values(conn, document_id)
-    autos = calculation_service.auto_values(conn, config, document_id)
-    st.markdown(f"**Calculated columns** · {len(current)} of {len(template.calculated)} entered")
-    st.caption("Type the value the way the dataset stores it (ratios and rates as decimals, e.g. 0.0352 for "
-               "3.52%; amounts in full Birr) and how you calculated it. Clear a value to remove it. "
-               "**Auto value** is worked out from the approved figures with a draft formula (not agreed yet); "
-               "⚠ marks a difference above 0.5%.")
-    entered = [current[c].value if c in current else None for c in template.calculated]
-    original = pd.DataFrame({
-        "Calculated column": list(template.calculated),
-        "Formula (draft)": [autos[c].words if c in autos else "" for c in template.calculated],
-        "Auto value": [_auto_text(autos.get(c)) for c in template.calculated],
-        "Value": ["" if v is None else _plain(v) for v in entered],
-        "Value − auto": [_difference(v, autos[c].value if c in autos else None)
-                         for c, v in zip(template.calculated, entered)],
-        "Auto − printed": [_difference(autos[c].value, autos[c].reported) if c in autos else ""
-                           for c in template.calculated],
-        "Formula / note": [current[c].formula_note if c in current else "" for c in template.calculated],
-        "Entered by": [current[c].reviewer if c in current else "" for c in template.calculated],
-        "Entered at (UTC)": [current[c].created_at[:16].replace("T", " ") if c in current else ""
-                             for c in template.calculated],
-    })
-    edited = st.data_editor(
-        original, hide_index=True, width="stretch", height=640, num_rows="fixed",
-        disabled=["Calculated column", "Formula (draft)", "Auto value", "Value − auto", "Auto − printed",
-                  "Entered by", "Entered at (UTC)"],
-        key=f"calc_editor_{document_id}_{len(history)}",  # a fresh editor after every save
-        column_config={
-            "Calculated column": st.column_config.TextColumn(width=230),
-            "Formula (draft)": st.column_config.TextColumn(width=260),
-            "Auto value": st.column_config.TextColumn(width=150),
-            "Value": st.column_config.TextColumn(width=110),
-            "Value − auto": st.column_config.TextColumn(width=130),
-            "Auto − printed": st.column_config.TextColumn(width=130),
-            "Formula / note": st.column_config.TextColumn(width=260),
-        },
-    )
-    save_col, accept_col = st.columns(2)
-    if save_col.button("Save calculated values", type="primary", icon=":material/save:", width="stretch"):
-        _save(config, document_id, original, edited)
     ready = [c for c, a in autos.items() if a.value is not None and c not in current]
-    if accept_col.button(f"Use auto values for empty columns ({len(ready)})", icon=":material/auto_awesome:",
-                         width="stretch", disabled=not ready):
-        _accept_auto(config, document_id)
-    _missing_inputs(autos)
-    _history(history)
+    missing = [c for c, a in autos.items() if a.value is None]
+    flagged = [c for c, a in autos.items() if _flagged(a)]
+    with st.container(key="panel_facts"):
+        cols = st.columns([1.6, 1.2, 1.4, 1.4, 1.3, 1.6], vertical_alignment="center")
+        if state.finished:
+            cols[0].html(style.chip("Extraction finished", "ok"))
+            cols[1].html(f'<span class="bpe-minor">by <b style="color:#15181E;font-weight:500">'
+                         f'{escape(state.reviewer)}</b></span>')
+        else:
+            cols[0].html(style.chip("Extraction not finished", "warn"))
+            if cols[1].button("Open in Review", key="calc_open_review"):
+                error = open_report(document_id)
+                if error:
+                    st.error(error, icon=":material/error:")
+        cols[2].html(f'<span class="bpe-minor"><b class="bpe-num" style="color:#15181E">{len(ready)}</b> ready to accept</span>')
+        cols[3].html(f'<span class="bpe-minor"><b class="bpe-num" style="color:#15181E">{len(missing)}</b> need an input</span>')
+        cols[4].html(f'<span class="bpe-minor"><b class="bpe-num" style="color:#15181E">{len(current)}</b> of '
+                     f'{len(template.calculated)} entered</span>')
+        if state.finished:
+            with cols[5]:
+                _reopen(config, document_id)
+    if error := st.session_state.pop("calc_error", None):
+        st.error(error, icon=":material/error:")
+    with st.container(key="draftnote"):
+        note_col, link_col = st.columns([5, 1.3], vertical_alignment="center")
+        note_col.markdown(":material/info: The formulas are **drafts** until Shega confirms them. ⚠ marks a "
+                          "difference above 0.5%.")
+        with link_col:
+            routes.link("templates", "See the formula list")
+    with st.container(key="panel_table_calc"):
+        with st.container(key="calc_tools"):
+            tab_col, accept_col = st.columns([4, 1.6], vertical_alignment="center")
+            counts = {"all": len(template.calculated), "ready": len(ready), "missing": len(missing),
+                      "differences": len(flagged)}
+            tab = tab_col.segmented_control("Show", list(TABS), key="calc_tab", default="all",
+                                            format_func=lambda k: f"{TABS[k]} {counts[k]}",
+                                            label_visibility="collapsed") or "all"
+            accept_col.button(f"Accept {len(ready)} auto values", key="calc_accept_all", type="primary",
+                              width="stretch", disabled=not ready or not state.finished,
+                              on_click=_accept_auto, args=(config, document_id))
+        with st.container(key="thead_calc"):
+            for col, title in zip(st.columns(COLUMNS, vertical_alignment="center"),
+                                  ("Calculated column", "Formula (draft)", "Auto value", "Printed in report",
+                                   "Difference", "Entered value", "")):
+                col.markdown(title)
+        shown = {"all": set(template.calculated), "ready": set(ready), "missing": set(missing),
+                 "differences": set(flagged)}[tab]
+        grouped = [*GROUPS, ("Network and customers",
+                             tuple(c for c in template.calculated if not any(c in g for _, g in GROUPS)))]
+        for group, columns in grouped:
+            members = [c for c in columns if c in shown]
+            if not members:
+                continue
+            with st.container(key=f"tgroup_{group.split()[0].lower()}"):
+                st.html(f'<div class="bpe-qgroup" style="padding:7px 16px">{escape(group)}</div>')
+            for column in members:
+                _row(config, document_id, column, autos.get(column), current.get(column), state.finished, open_report)
 
 
-def _auto_text(auto: calculation_service.AutoValue | None) -> str:
-    if auto is None:
+def _flagged(auto: calculation_service.AutoValue) -> bool:
+    found = calculation_service.difference(auto.value, auto.reported)
+    return found is not None and found[1]
+
+
+def _row(config: AppConfig, document_id: str, column: str, auto: calculation_service.AutoValue | None,
+         entered: calculation_service.CalculatedValue | None, finished: bool,
+         open_report: Callable[[str], str | None]) -> None:
+    key = f"trow_calc_{config.export_template.calculated.index(column)}"
+    with st.container(key=key):
+        cols = st.columns(COLUMNS, vertical_alignment="center")
+        cols[0].html(f'<span style="font-size:13px">{escape(column)}</span>')
+        cols[1].html(f'<span class="bpe-minor" style="font-size:13px">{escape(auto.words if auto else "")}</span>')
+        if auto is not None and auto.value is None:
+            missing = [i.label for i in auto.inputs if i.kind == "missing"]
+            cols[2].html(f'<span class="bpe-checkwarn" style="font-size:12px">missing: '
+                         f'{escape(", ".join(missing) or "an input")}</span>')
+        else:
+            cols[2].html(f'<span class="bpe-num">{escape(_plain_auto(auto))}</span>')
+        cols[3].html(f'<span class="bpe-num">{escape(_number(auto.reported, auto.formula.unit) if auto else "")}'
+                     '</span>')
+        cols[4].html(_difference_html(auto) or BLANK)
+        value = "" if entered is None or entered.value is None else _plain(entered.value)
+        cols[5].text_input("Entered value", value=value, key=f"calc_entered_{document_id}_{key}", placeholder="—",
+                           label_visibility="collapsed", disabled=not finished,
+                           on_change=_typed, args=(config, document_id, column, auto, f"calc_entered_{document_id}_{key}"))
+        if not finished:
+            return
+        if auto is not None and auto.value is None:
+            missing_ids = [i.variable for i in auto.inputs if i.kind == "missing"]
+            if cols[6].button("Find input", key=f"find_{key}", width="stretch"):
+                st.session_state.open_metric = missing_ids[0].removesuffix("_prev") if missing_ids else None
+                error = open_report(document_id)
+                if error:
+                    st.error(error, icon=":material/error:")
+        elif auto is not None and entered is None:
+            if _flagged(auto):
+                with cols[6].popover("Check", width="stretch"):
+                    st.markdown(f"**{escape(column)}**")
+                    st.code(auto.arithmetic, language=None, wrap_lines=True)
+                    st.caption(f"Printed in the report: {_plain(auto.reported)}. The difference is above 0.5%.")
+                    st.button("Accept the auto value", key=f"accept_{key}", type="primary",
+                              on_click=_accept_one, args=(config, document_id, auto))
+            else:
+                cols[6].button("Accept", key=f"accept_{key}", width="stretch",
+                               on_click=_accept_one, args=(config, document_id, auto))
+
+
+def _plain_auto(auto: calculation_service.AutoValue | None) -> str:
+    return "" if auto is None else _number(auto.value, auto.formula.unit)
+
+
+def _number(value: Decimal | None, unit: str) -> str:
+    """Amounts and counts with thousands separators; ratios as stored."""
+    if value is None:
         return ""
-    if auto.value is None:
-        missing = [i.label for i in auto.inputs if i.kind == "missing"]
-        return "missing: " + ", ".join(missing) if missing else "cannot calculate"
-    return _shown(auto.value, auto.formula.unit)
+    if unit in ("ETB", "count") and abs(value) >= 1000:
+        return f"{value.normalize():,f}"
+    return _plain(value.normalize())
 
 
-def _difference(value: Decimal | None, reference: Decimal | None) -> str:
-    found = calculation_service.difference(value, reference)
+def _difference_html(auto: calculation_service.AutoValue | None) -> str:
+    found = calculation_service.difference(auto.value, auto.reported) if auto else None
     if found is None:
         return ""
     gap, flagged = found
-    share = f" ({abs(gap) / abs(reference) * 100:.1f}%)" if reference else ""
-    return f"{gap.normalize():+,f}{share} " + ("⚠" if flagged else "✓")
+    share = f" ({abs(gap) / abs(auto.reported) * 100:.1f}%)" if auto.reported and gap else ""
+    if flagged:
+        return f'<span class="bpe-num" style="color:#7A4900;font-weight:500">{gap.normalize():+f}{share} ⚠</span>'
+    return f'<span class="bpe-num" style="color:#17663F">{"0" if not gap else f"{gap.normalize():+f}"}{share} ✓</span>'
 
 
-def _shown(value: Decimal, unit: str) -> str:
-    if unit == "fraction":
-        return f"{value.normalize():f} ({(value * 100).normalize():f}%)"
-    return f"{value.normalize():,f}"
+def _accept_one(config: AppConfig, document_id: str, auto: calculation_service.AutoValue) -> None:
+    try:
+        with closing(connect(config.settings.database_path)) as conn:
+            calculation_service.enter_value(conn, config.export_template, document_id, auto.column, auto.value,
+                                            auto.note, st.session_state.get("reviewer", ""))
+    except ReviewError as exc:
+        st.session_state.calc_error = f"{auto.column}: {exc}"
+
+
+def _typed(config: AppConfig, document_id: str, column: str, auto: calculation_service.AutoValue | None,
+           key: str) -> None:
+    """A value typed in the Entered value box: saved with a note saying it was typed (empty clears it)."""
+    value = (st.session_state.get(key) or "").strip()
+    note = f"Typed by the analyst (draft formula: {auto.words})" if auto else "Typed by the analyst"
+    try:
+        with closing(connect(config.settings.database_path)) as conn:
+            calculation_service.enter_value(conn, config.export_template, document_id, column, value,
+                                            note if value else "", st.session_state.get("reviewer", ""))
+    except ReviewError as exc:
+        st.session_state.calc_error = f"{column}: {exc}"
 
 
 def _accept_auto(config: AppConfig, document_id: str) -> None:
@@ -203,19 +228,9 @@ def _accept_auto(config: AppConfig, document_id: str) -> None:
             saved = calculation_service.accept_auto_values(conn, config, document_id,
                                                            st.session_state.get("reviewer", ""))
     except ReviewError as exc:
-        st.error(str(exc), icon=":material/error:")
+        st.session_state.calc_error = str(exc)
         return
     st.toast(f"Saved {len(saved)} auto value(s)", icon=":material/check_circle:")
-    st.rerun()
-
-
-def _missing_inputs(autos: dict[str, calculation_service.AutoValue]) -> None:
-    blocked = {c: a for c, a in autos.items() if a.problems}
-    if not blocked:
-        return
-    with st.expander(f"Why some auto values are missing ({len(blocked)})"):
-        for column, auto in blocked.items():
-            st.caption(f"**{column}**: " + " ".join(dict.fromkeys(auto.problems)))
 
 
 def _save(config: AppConfig, document_id: str, original: pd.DataFrame, edited: pd.DataFrame) -> None:

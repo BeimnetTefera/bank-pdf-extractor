@@ -81,10 +81,10 @@ def test_sidebar_starts_expanded(app):
     assert app.page_configs and all(c.get("initial_sidebar_state") == "expanded" for c in app.page_configs)
 
 
-def test_sidebar_is_the_same_after_a_rerun(app):
+def test_menu_is_the_same_after_a_rerun(app):
     app.run()
-    first = [w.label for w in app.sidebar.text_input]
+    first = [e.proto.label for e in app.get("page_link")]
     app.run()
     assert not app.exception
-    assert first == ["Reviewer"]
-    assert [w.label for w in app.sidebar.text_input] == first
+    assert first[:7] == ["Reports", "Extract", "Review", "Calculations", "Sector data", "Templates", "Settings"]
+    assert [e.proto.label for e in app.get("page_link")] == first

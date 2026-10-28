@@ -10,7 +10,7 @@ from src import external_sources as ext
 from src import review_service, sector_data
 from src.database import connect
 from src.external_sources import SourceInput
-from tests.conftest import make_pdf
+from tests.conftest import html_text, make_pdf
 from tests.test_app_calculate import REVIEWER, Upload, app, open_metric  # noqa: F401 (app is a fixture)
 from tests.test_app_evidence import screen
 
@@ -68,7 +68,7 @@ def test_value_from_an_external_source_in_metric_details(app, monkeypatch):
 
     page = screen(app, report=app.document_id, metric="employees")
     assert not page.exception
-    shown = " ".join(m.value for m in page.markdown) + " ".join(c.value for c in page.caption)
+    shown = " ".join(m.value for m in page.markdown) + " ".join(c.value for c in page.caption) + html_text(page)
     assert "External source" in shown and "NBE Annual Report 2022/23" in shown
     assert f"> {QUOTE}" in shown.replace("\\", "")  # the quote as a blockquote
     assert "12,345 = 12,345" in shown
@@ -175,7 +175,7 @@ def test_sector_value_recorded_and_approved_on_the_sector_page(tmp_path):
     fill_source(at, key, "2,345.6", quote="Deposits of the banking system reached Birr 2,345.6 billion")
     at.text_input(key=f"{key}_url").input("https://nbe.gov.et/annual-report-2025-26.pdf").run()
     assert any("2,345.6 billion Birr = 2,345,600,000,000 ETB" in c.value.replace("\\", "") for c in at.caption)
-    next(b for b in at.button if b.label == "Save sector value").click().run()
+    next(b for b in at.button if b.label == "Save for approval").click().run()
     assert not at.exception
     next(b for b in at.button if b.label == "Approve").click().run()
     assert not at.exception
@@ -214,8 +214,10 @@ def test_sector_not_reported_and_reopen(tmp_path):
     at.text_area(key=f"{key}_reopen_reason").input("Wrong table in the NBE report").run()
     next(b for b in at.button if b.key == f"{key}_reopen").click().run()
     assert not at.exception
-    at.text_area(key=f"{key}_nr_reason").input("NBE has not published 2025/26 yet").run()
-    next(b for b in at.button if b.key == f"{key}_nr_save").click().run()
+    with closing(connect(data_dir / "app.db")) as conn:  # Not reported is parked off the page (redesign backlog)
+        sector_data.record_not_reported(conn, config, "2025/26", "sector_total_deposits_etb",
+                                        "NBE has not published 2025/26 yet", REVIEWER)
+    at.run()
     next(b for b in at.button if b.label == "Approve").click().run()
     assert not at.exception
     with closing(connect(data_dir / "app.db")) as conn:

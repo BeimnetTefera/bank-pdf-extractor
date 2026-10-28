@@ -46,8 +46,8 @@ def test_wording_tab_lists_the_metrics_wording(app):
 
 
 def test_add_wording_writes_it_with_the_note(app, config_dir):
-    app.text_input[0].input("Total customer deposits")
-    app.text_input[1].input("Test Bank p12")
+    app.text_input[1].input("Total customer deposits")
+    app.text_input[2].input("Test Bank p12")
     app.button[0].click().run()  # the form's Add button
     assert not app.exception
     assert "Total customer deposits" in wording_of(config_dir, "total_deposits_etb")
@@ -58,7 +58,7 @@ def test_add_wording_writes_it_with_the_note(app, config_dir):
 
 def test_refused_wording_shows_why_and_changes_nothing(app, config_dir):
     before = (config_dir / "mappings.yaml").read_text(encoding="utf-8")
-    app.text_input[0].input("Total assets")
+    app.text_input[1].input("Total assets")
     app.button[0].click().run()
     assert any("already means total_assets_etb" in e.value for e in app.error)
     assert (config_dir / "mappings.yaml").read_text(encoding="utf-8") == before

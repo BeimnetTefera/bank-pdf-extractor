@@ -88,7 +88,7 @@ Prints page count, text availability and raw label/value rows with their PDF pag
 
 ## Reviewing a report in the app
 
-1. `streamlit run app.py`, open **Extract & Review**.
+1. `streamlit run app.py`. The app opens on **Extract**; **Reports** lists every saved report, **New report** uploads one, and **Review** checks it metric by metric (the screens follow the redesign mockup, D-092; the search box in the top bar finds reports, metrics and printed figures). The steps below use **Extract**, the original screen.
 2. Choose the bank from the list, enter the report year (e.g. `2025/26`), upload the PDF, choose metrics if needed.
 3. Click a metric to see its figure boxed on the PDF page, its source, unit conversion, checks and other candidates.
 4. Press **Save report**, then for each metric: **Approve** (choose the sign; confirm any warnings), **Reject** (reason), **Correct** (value, unit, reason, then *Approve correction*), or **Enter manually** for metrics not found.

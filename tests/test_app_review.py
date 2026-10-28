@@ -17,6 +17,7 @@ from src.page_marks import Mark
 from src.pdf_extractor import TABLE_METHOD
 from src.unit_normalizer import UnitEvidence
 from src.project_service import list_documents, load_candidates
+from tests.conftest import html_text
 from tests.test_app_smoke import FakeUpload
 
 APP = Path(__file__).resolve().parent.parent / "app.py"
@@ -148,7 +149,7 @@ def test_a_separate_copy_can_still_be_saved(app):
 
 
 def bank_reports_page(data_dir: str) -> None:
-    """The Bank Reports screen on its own, with a given data folder (run by AppTest.from_function)."""
+    """The Reports screen on its own, with a given data folder (run by AppTest.from_function)."""
     from dataclasses import replace
     from pathlib import Path
 
@@ -159,9 +160,39 @@ def bank_reports_page(data_dir: str) -> None:
     pages.bank_reports(replace(config, settings=replace(config.settings, data_dir=Path(data_dir))), lambda _: None)
 
 
+def parked_tools_page(data_dir: str) -> None:
+    """The report tools parked off the redesigned screens (docs/redesign-backlog.md), on their own:
+    fix names and years, then per report Delete and Work left, then the deletion log."""
+    from contextlib import closing
+    from dataclasses import replace
+    from pathlib import Path
+
+    import streamlit as st
+
+    from src import bulk_review, review_service
+    from src.config_loader import load_config
+    from src.database import connect
+    from src.project_service import list_documents
+    from src.ui import pages
+
+    config = load_config()
+    config = replace(config, settings=replace(config.settings, data_dir=Path(data_dir)))
+    pages._fix_names_and_years(config)
+    with closing(connect(config.settings.database_path)) as conn:
+        documents = list_documents(conn)
+        rows = [(d, len(review_service.approved_results(conn, d["id"])), bulk_review.outstanding_work(conn, d["id"], config))
+                for d in documents]
+    if not documents:
+        st.info("No reports saved yet.")
+    for d, approved, work in rows:
+        pages._delete_report(config, d, approved)
+        pages._work_left(config, d["id"], work, lambda _: None)
+    pages._deletion_log(config)
+
+
 def test_delete_a_saved_report_from_bank_reports(app):
     save(app)
-    page = AppTest.from_function(bank_reports_page, args=(str(app.db_path.parent),), default_timeout=60)
+    page = AppTest.from_function(parked_tools_page, args=(str(app.db_path.parent),), default_timeout=60)
     page.session_state["reviewer"] = "Analyst A"
     page.run()
     delete = next(b for b in page.button if b.label == "Delete permanently")
@@ -278,9 +309,7 @@ def test_finish_extraction_locks_figures_and_opens_calculations(app):
     page = AppTest.from_function(_calculations_page_script, default_timeout=60)
     page.run()
     assert not page.exception
-    assert any("Calculated columns" in m.value and "0 of 26" in m.value for m in page.markdown)
-    figures = page.dataframe[0].value.set_index("Figure")
-    assert figures.loc["Total Assets", "Value"] == "1,234,567,000"
+    assert "of 26 entered" in html_text(page) and "Extraction finished" in html_text(page)
 
     save_page = AppTest.from_function(_save_calculated_script, default_timeout=60)
     save_page.session_state["document_id"] = document_id

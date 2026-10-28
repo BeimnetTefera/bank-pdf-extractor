@@ -38,19 +38,25 @@ def value_beside(match: Box, numbers: list[tuple[Box, str]]) -> Box | None:
     return min(chosen, key=lambda item: item[0][0])[0] if chosen else None
 
 
-def find_in_report(pdf_bytes: bytes, query: str, ocr_words: dict[int, list[list]] | None = None) -> list[tuple[int, Box]]:
-    """Each zero-based page that holds the query, once, with the box of its first match there."""
+def figure_for(matches: list[Box], numbers: list[tuple[Box, str]]) -> Box:
+    """The box to show for a page's matches: the figure beside the first match that has one, since a
+    page often names a line in a heading or a sentence before its table row. Else the first match."""
+    return next((v for m in matches if (v := value_beside(m, numbers)) is not None), matches[0])
+
+
+def find_in_report(pdf_bytes: bytes, query: str,
+                   ocr_words: dict[int, list[list]] | None = None) -> list[tuple[int, list[Box]]]:
+    """Each zero-based page that holds the query, once, with the boxes of every match there in reading order."""
     forms = _forms(query)
     if len(forms[0]) < 2:
         return []
-    hits: list[tuple[int, Box]] = []
+    hits: list[tuple[int, list[Box]]] = []
     with pymupdf.open(stream=pdf_bytes, filetype="pdf") as doc:
         for page in doc:
-            box = next((tuple(r) for f in forms for r in page.search_for(f)[:1]), None)
-            if box is None and ocr_words and page.number in ocr_words:
+            boxes = next(([tuple(r) for r in found] for f in forms if (found := page.search_for(f))), [])
+            if not boxes and ocr_words and page.number in ocr_words:
                 wanted = [f.casefold() for f in forms]
-                box = next((tuple(w[:4]) for w in ocr_words[page.number]
-                            if any(f in str(w[4]).casefold() for f in wanted)), None)
-            if box is not None:
-                hits.append((page.number, box))
+                boxes = [tuple(w[:4]) for w in ocr_words[page.number] if any(f in str(w[4]).casefold() for f in wanted)]
+            if boxes:
+                hits.append((page.number, boxes))
     return hits

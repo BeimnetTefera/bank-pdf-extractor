@@ -254,14 +254,14 @@ def _zoom(at: int) -> None:
 
 
 @st.cache_data(show_spinner=False, max_entries=30)
-def _find(sha256: str, query: str, _pdf_bytes: bytes, _ocr_words: dict) -> list[tuple[int, tuple]]:
+def _find(sha256: str, query: str, _pdf_bytes: bytes, _ocr_words: dict) -> list[tuple[int, list[tuple]]]:
     return page_search.find_in_report(_pdf_bytes, query, _ocr_words)
 
 
-def _figure_for(p: Prepared, page_index: int, box: tuple) -> tuple:
+def _figure_for(p: Prepared, page_index: int, matches: list[tuple]) -> tuple:
     """Searching a label boxes the figure printed beside it; a searched number is boxed itself."""
     numbers = [(c.bbox, c.raw_value_text) for c in p.extraction.candidates if c.page_index == page_index]
-    return page_search.value_beside(box, numbers) or box
+    return page_search.figure_for(matches, numbers)
 
 
 def _go_hit(page_index: int, box: tuple) -> None:
@@ -287,10 +287,10 @@ def _find_results(p: Prepared, page: int) -> None:
                           vertical_alignment="center", gap="small")
         cols[0].html(f'<span class="bpe-minor">“{escape(query)}” is on {len(hits)} page{"s" if len(hits) != 1 else ""}:'
                      '</span>')
-        for col, (page_index, box) in zip(cols[1:], shown):
+        for col, (page_index, matches) in zip(cols[1:], shown):
             col.button(str(page_index + 1), key=f"ex_hit_{page_index}", width="stretch",
                        type="primary" if page_index == page - 1 else "secondary",
-                       on_click=_go_hit, args=(page_index, _figure_for(p, page_index, box)))
+                       on_click=_go_hit, args=(page_index, _figure_for(p, page_index, matches)))
         if len(hits) > len(shown):
             cols[-1].html(f'<span class="bpe-minor">and {len(hits) - len(shown)} more; type more words to narrow it'
                           '</span>')

@@ -103,3 +103,23 @@ def test_status_comes_from_the_value_the_app_picked_only():
     assert (percent.label, percent.kind) == ("Percentage, not Birr", "bad")
     assert metric_status(result(found=False), None).group == "not_found"
     assert metric_status(result(finding("CONFLICT")), SimpleNamespace(status="approved")).label == "Approved"
+
+
+def test_the_search_box_lists_the_pages_with_a_word_and_opens_one(app):
+    page = open_extract(app)
+    page.text_input(key="ex_find").input("total assets").run()
+    assert not page.exception
+    hits = [b for b in page.button if (b.key or "").startswith("ex_hit_")]
+    assert [b.label for b in hits] == ["1", "2"]  # the synthetic report prints it on both pages
+    hits[1].click().run()
+    assert page.session_state["viewer_page"] == 2 and page.session_state["ex_focus"] == "find"
+    page.text_input(key="ex_find").input("no such words").run()
+    assert "is not on any page of this report" in html_text(page)
+
+
+def test_a_page_number_can_be_typed_and_the_whole_page_opened_large(app):
+    page = open_extract(app)
+    page.number_input(key="viewer_page").set_value(1).run()
+    assert not page.exception and page.session_state["viewer_page"] == 1
+    page.button(key="ex_full").click().run()
+    assert not page.exception

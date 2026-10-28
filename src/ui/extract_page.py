@@ -17,14 +17,15 @@ from html import escape
 import streamlit as st
 from PIL import Image
 
-from src import ocr
+from src import ocr, page_search
 from src.candidate_queries import find_by_key
 from src.config_loader import AppConfig
 from src.database import connect
 from src.models import METRIC_LEVEL_RULES, MetricCandidate, MetricResult
+from src.pdf_render import focus_of
 from src.project_service import get_document, new_figures
 from src.review_service import ReviewState
-from src.ui import extract_review, review_page, shell, style
+from src.ui import extract_review, review_page, style
 from src.ui.extract_review import Prepared
 
 ROWS_PER_PAGE = 6  # the drawer has a fixed height: it never scrolls, it pages
@@ -32,7 +33,8 @@ FILTERS = ("all", "needs", "found", "not_found")
 FILTER_LABELS = {"all": "All", "needs": "Needs a look", "found": "Found", "not_found": "Not found"}
 TABS = ("metrics", "checks")
 ZOOMS = list(extract_review.ZOOM_LEVELS)
-STRIP_ASPECT = 3.5  # width / height of the page strip shown above the drawer
+STRIP_ASPECT = 2.6  # width / height of the close-up strip beside the whole page
+HITS_SHOWN = 10  # pages listed for a search; more are counted
 
 
 @dataclass(frozen=True)
@@ -123,6 +125,7 @@ def _ordered(p: Prepared) -> list[str]:
 def _pick(p: Prepared, metric_id: str) -> None:
     """Open the metric's page with its figure boxed (the page opens by itself)."""
     extract_review._select_metric(metric_id, p.analysis, p.extraction, p.marked_values, p.ctx)
+    st.session_state.ex_focus = "metric"
 
 
 # --- the bar ----------------------------------------------------------------------------------
@@ -169,78 +172,140 @@ def _new_figures(p: Prepared) -> None:
     extract_review._new_figures_prompt(p.ctx, new, p.analysis, p.extraction, saved_version)
 
 
-# --- on top: the page ----------------------------------------------------------------------------
+# --- on top: the whole page and a close-up of the boxed row (option H, D-095) ---------------------
 
 def _upper(p: Prepared, metric_id: str | None) -> None:
     page_count = p.extraction.page_count
     st.session_state.viewer_page = min(max(1, st.session_state.get("viewer_page", 1)), page_count)
-    st.session_state.setdefault("viewer_zoom", "100%")
-    st.session_state.setdefault("pan_x", 50)
-    st.session_state.setdefault("pan_y", 50)
+    st.session_state.setdefault("ex_zoom", "100%")
     page = st.session_state.viewer_page
+    box, kind = _box_on(p, page)
     with st.container(key="ex_upper"):
-        thumbs_col, page_col = st.columns([0.55, 9], gap=None)
-        with thumbs_col, st.container(key="ex_thumbs"):
-            for n in _thumb_pages(p, metric_id, page):
-                st.button(str(n), key=f"ex_thumb_{n}", type="primary" if n == page else "secondary", width="stretch",
-                          on_click=extract_review._go_to, args=(n,), help=f"PDF page {n}")
-        with page_col, st.container(key="ex_page"):
-            _opened_bar(p, metric_id, page)
+        whole_col, close_col = st.columns([1, 4.3], gap=None)
+        with whole_col, st.container(key="ex_whole"):
+            st.html('<div class="bpe-cap">Whole page</div>')
+            st.image(_page_png(p, page, box, kind, 1.0), width="stretch")
+            if st.button("See the whole page", icon=":material/fullscreen:", key="ex_full", width="stretch",
+                         help="Open this page large, in a window over the app"):
+                highlight, boxes = _boxes(p, page, box, kind)
+                extract_review._full_screen(p.doc, page, highlight, boxes)
+        with close_col, st.container(key="ex_page"):
+            _toolbar(p, metric_id, page, box is not None and kind == "selected")
+            _find_results(p, page)
             with st.container(key="ex_sheet"):
-                _page_image(p, page)
+                _close_up(p, page, box, kind)
 
 
-def _thumb_pages(p: Prepared, metric_id: str | None, page: int) -> list[int]:
-    """The pages next to this one and the pages of the picked metric's other values."""
-    pages = {n for n in (page - 1, page, page + 1) if 1 <= n <= p.extraction.page_count}
-    if metric_id:
-        result = p.analysis.metric(metric_id)
-        pages |= {c.mapped.candidate.page_index + 1 for c in result.current_candidates[:3]}
-    return sorted(pages)[:6]
+def _box_on(p: Prepared, page: int) -> tuple[tuple | None, str]:
+    """The box to show on this page: the word just found, else the picked metric's figure."""
+    found = st.session_state.get("ex_found")
+    if st.session_state.get("ex_focus") == "find" and found and found[0] == page - 1:
+        return tuple(found[1]), "marked"
+    selected = find_by_key(p.extraction.candidates, st.session_state.get("selected_key"))
+    if selected is not None and selected.page_index == page - 1:
+        return tuple(selected.bbox), "selected"
+    return None, "selected"
 
 
-def _selected_candidate(p: Prepared):
-    return find_by_key(p.extraction.candidates, st.session_state.get("selected_key"))
+def _boxes(p: Prepared, page: int, box: tuple | None, kind: str) -> tuple[tuple | None, tuple]:
+    """The red box (the metric's figure) and the other boxes drawn on this page."""
+    highlight = box if kind == "selected" else None
+    boxes = tuple((b, "recorded", name) for _, (pg, b, name) in p.recorded.items() if pg == page - 1)
+    if box is not None and kind == "marked":
+        boxes += ((box, "marked"),)
+    return highlight, boxes
 
 
-def _opened_bar(p: Prepared, metric_id: str | None, page: int) -> None:
+def _page_png(p: Prepared, page: int, box: tuple | None, kind: str, scale_zoom: float) -> bytes:
+    highlight, boxes = _boxes(p, page, box, kind)
+    return extract_review._render(p.doc["sha"], page - 1, highlight, extract_review.BASE_RESOLUTION * scale_zoom, 1.0,
+                                  (0.5, 0.5), boxes, p.doc["bytes"])
+
+
+def _toolbar(p: Prepared, metric_id: str | None, page: int, opened: bool) -> None:
     page_count = p.extraction.page_count
-    selected = _selected_candidate(p)
     name = p.analysis.metric(metric_id).metric.display_name if metric_id else None
     with st.container(key="ex_opened"):
-        cols = st.columns([5, 0.45, 0.75, 0.45, 0.45, 0.6, 0.45], vertical_alignment="center", gap="small")
-        if name and selected is not None and selected.page_index == page - 1:
-            cols[0].html(f'<span class="bpe-opened">→ Opened for <b>{escape(name)}</b> · PDF page {page}</span>')
-        else:
-            cols[0].html(f'<span class="bpe-opened">PDF page {page}</span>')
-        cols[1].button("", icon=":material/chevron_left:", key="ex_prev_page", disabled=page <= 1,
+        cols = st.columns([2.6, 2.4, 0.32, 0.62, 0.55, 0.32, 0.2, 0.32, 0.55, 0.32], vertical_alignment="center",
+                          gap=None)
+        if opened and name:
+            cols[0].html(f'<span class="bpe-opened">→ Opened for <b>{escape(name)}</b></span>')
+        elif st.session_state.get("ex_focus") == "find" and st.session_state.get("ex_find"):
+            cols[0].html(f'<span class="bpe-opened">“{escape(st.session_state.ex_find)}” on PDF page {page}</span>')
+        cols[1].text_input("Find in this report", key="ex_find", placeholder="Find a word or number in this report",
+                           label_visibility="collapsed", icon=":material/search:")
+        cols[2].button("", icon=":material/chevron_left:", key="ex_prev_page", disabled=page <= 1,
                        on_click=extract_review._go_to, args=(page - 1,), help="Previous page")
-        cols[2].html(f'<span class="bpe-num" style="white-space:nowrap">{page} of {page_count}</span>')
-        cols[3].button("", icon=":material/chevron_right:", key="ex_next_page", disabled=page >= page_count,
+        cols[3].number_input("Page", min_value=1, max_value=page_count, key="viewer_page", label_visibility="collapsed",
+                             help="Type a page number to go to it")
+        cols[4].html(f'<span class="bpe-num bpe-minor" style="white-space:nowrap">of {page_count}</span>')
+        cols[5].button("", icon=":material/chevron_right:", key="ex_next_page", disabled=page >= page_count,
                        on_click=extract_review._go_to, args=(page + 1,), help="Next page")
-        at = ZOOMS.index(st.session_state.viewer_zoom) if st.session_state.viewer_zoom in ZOOMS else 0
-        cols[4].button("", icon=":material/remove:", key="ex_zoom_out", disabled=at <= 0, on_click=review_page._zoom,
+        at = ZOOMS.index(st.session_state.ex_zoom) if st.session_state.ex_zoom in ZOOMS else 0
+        cols[7].button("", icon=":material/remove:", key="ex_zoom_out", disabled=at <= 0, on_click=_zoom,
                        args=(at - 1,), help="Zoom out")
-        cols[5].html(f'<span class="bpe-num">{escape(ZOOMS[at])}</span>')
-        cols[6].button("", icon=":material/add:", key="ex_zoom_in", disabled=at >= len(ZOOMS) - 1,
-                       on_click=review_page._zoom, args=(at + 1,), help="Zoom in")
+        cols[8].html(f'<span class="bpe-num" style="display:block;text-align:center">{escape(ZOOMS[at])}</span>')
+        cols[9].button("", icon=":material/add:", key="ex_zoom_in", disabled=at >= len(ZOOMS) - 1, on_click=_zoom,
+                       args=(at + 1,), help="Zoom in")
 
 
-def _page_image(p: Prepared, page: int) -> None:
-    selected = _selected_candidate(p)
-    highlight = selected.bbox if selected is not None and selected.page_index == page - 1 else None
-    boxes = tuple((box, "recorded", name) for _, (pg, box, name) in p.recorded.items() if pg == page - 1)
-    view_zoom = extract_review.ZOOM_LEVELS.get(st.session_state.viewer_zoom, 1.0)
-    focus = (st.session_state.pan_x / 100, st.session_state.pan_y / 100)
-    png = extract_review._render(p.doc["sha"], page - 1, highlight, extract_review.BASE_RESOLUTION * view_zoom, 1.0,
-                                 (0.5, 0.5), boxes, p.doc["bytes"])
-    st.image(_strip(png, view_zoom, focus), width="stretch")
+def _zoom(at: int) -> None:
+    st.session_state.ex_zoom = ZOOMS[at]
+
+
+@st.cache_data(show_spinner=False, max_entries=30)
+def _find(sha256: str, query: str, _pdf_bytes: bytes, _ocr_words: dict) -> list[tuple[int, tuple]]:
+    return page_search.find_in_report(_pdf_bytes, query, _ocr_words)
+
+
+def _go_hit(page_index: int, box: tuple) -> None:
+    st.session_state.viewer_page = page_index + 1
+    st.session_state.ex_found = (page_index, box)
+    st.session_state.ex_focus = "find"
+
+
+def _find_results(p: Prepared, page: int) -> None:
+    """The pages that hold what was typed in the search box, each one click away."""
+    query = (st.session_state.get("ex_find") or "").strip()
+    if len(query) < 2:
+        return
+    hits = _find(p.doc["sha"], query, p.doc["bytes"], p.ocr_words)
+    with st.container(key="ex_hits"):
+        st.html("<style>.st-key-ex_sheet { height: calc(100vh - 556px) !important; } "  # room for this row
+                ".st-key-ex_sheet img { max-height: calc(100vh - 584px); }</style>")
+        if not hits:
+            st.html(f'<span class="bpe-minor">“{escape(query)}” is not on any page of this report.</span>')
+            return
+        shown = hits[:HITS_SHOWN]
+        cols = st.columns([2.2] + [0.42] * len(shown) + [1.4 + 0.42 * (HITS_SHOWN - len(shown))],
+                          vertical_alignment="center", gap="small")
+        cols[0].html(f'<span class="bpe-minor">“{escape(query)}” is on {len(hits)} page{"s" if len(hits) != 1 else ""}:'
+                     '</span>')
+        for col, (page_index, box) in zip(cols[1:], shown):
+            col.button(str(page_index + 1), key=f"ex_hit_{page_index}", width="stretch",
+                       type="primary" if page_index == page - 1 else "secondary",
+                       on_click=_go_hit, args=(page_index, box))
+        if len(hits) > len(shown):
+            cols[-1].html(f'<span class="bpe-minor">and {len(hits) - len(shown)} more; type more words to narrow it'
+                          '</span>')
+
+
+def _close_up(p: Prepared, page: int, box: tuple | None, kind: str) -> None:
+    """The boxed row and the rows around it, large. With nothing boxed, the page at full width."""
+    view_zoom = extract_review.ZOOM_LEVELS.get(st.session_state.ex_zoom, 1.0)
+    png = _page_png(p, page, box, kind, view_zoom * 1.4)
+    if box is None:
+        st.html("<style>.st-key-ex_sheet { overflow-y: auto !important; }</style>")
+        st.image(png, width="stretch")
+        return
+    size = p.extraction.pages[page - 1]
+    st.image(_strip(png, view_zoom, focus_of(box, size.width, size.height)), width="stretch")
 
 
 @st.cache_data(show_spinner=False, max_entries=50)
 def _strip(png: bytes, view_zoom: float, focus: tuple[float, float]) -> bytes:
-    """A wide strip of the page around focus: the drawer leaves a short, wide space, so a whole
-    portrait page would be tiny. At 100% the strip is the page's full width; zooming in narrows it."""
+    """A wide strip of the page around focus. At 100% the strip is the page's full width;
+    zooming in narrows it, so the rows around the box get larger."""
     image = Image.open(io.BytesIO(png))
     width = image.width / view_zoom
     height = min(image.height, width / STRIP_ASPECT)
@@ -296,13 +361,31 @@ def _metric_rows(p: Prepared, statuses: dict[str, Status], shown: list[str], sel
             _row(p, metric_id, statuses[metric_id], metric_id == selected)
         if not shown:
             st.html('<div class="bpe-qmore">Nothing in this list. Choose another filter.</div>')
-    shell.pager("ex_page", len(shown), ROWS_PER_PAGE)
+    _list_pager(len(shown))
 
 
 def _page_slice(total: int) -> tuple[int, int]:
     pages = max(1, -(-total // ROWS_PER_PAGE))
     page = min(max(0, st.session_state.get("ex_page", 0)), pages - 1)
+    st.session_state.ex_page = page
     return page * ROWS_PER_PAGE, min(total, (page + 1) * ROWS_PER_PAGE)
+
+
+def _list_pager(total: int) -> None:
+    """A small pager on the right under the list: "1–6 of 41  ‹ 1 / 7 ›"."""
+    if not total:
+        return
+    pages = max(1, -(-total // ROWS_PER_PAGE))
+    page = st.session_state.get("ex_page", 0)
+    start, end = _page_slice(total)
+    with st.container(key="ex_pager"):
+        cols = st.columns([6, 1.3, 0.35, 0.6, 0.35], vertical_alignment="center", gap=None)
+        cols[1].html(f'<span class="bpe-num bpe-minor" style="white-space:nowrap">{start + 1}–{end} of {total}</span>')
+        cols[2].button("", icon=":material/chevron_left:", key="ex_page_prev", disabled=page == 0, help="Previous rows",
+                       on_click=st.session_state.__setitem__, args=("ex_page", page - 1))
+        cols[3].html(f'<span class="bpe-num" style="display:block;text-align:center">{page + 1} / {pages}</span>')
+        cols[4].button("", icon=":material/chevron_right:", key="ex_page_next", disabled=page >= pages - 1,
+                       help="Next rows", on_click=st.session_state.__setitem__, args=("ex_page", page + 1))
 
 
 def _row(p: Prepared, metric_id: str, status: Status, selected: bool) -> None:
@@ -362,4 +445,9 @@ def _about(p: Prepared, result: MetricResult, status: Status, open_review: Calla
         n = c.mapped.candidate.page_index + 1
         st.button(f"Box {c.mapped.candidate.raw_value_text} on page {n}", key=f"ex_show_{n}_{c.mapped.candidate.row_index}",
                   width="stretch",
-                  on_click=extract_review._show_candidate, args=(c.mapped.candidate, p.extraction))
+                  on_click=_show_other, args=(c.mapped.candidate, p.extraction))
+
+
+def _show_other(candidate, extraction) -> None:
+    extract_review._show_candidate(candidate, extraction)
+    st.session_state.ex_focus = "metric"

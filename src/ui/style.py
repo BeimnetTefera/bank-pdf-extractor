@@ -203,28 +203,42 @@ header[data-testid="stHeader"] { display: none; }
 .bpe-itable td { padding: 9px 12px 9px 0; border-bottom: 1px solid #EEF0F3; }
 .bpe-itable .r { text-align: right; }
 
-/* Extract: the page on top, the drawer underneath (option F refined, D-094); the page never scrolls */
+/* Extract: whole page and close-up on top, the drawer underneath (D-094, D-095); the page never scrolls */
 .st-key-extract_work { gap: 0; }
 .st-key-extract_bar { background: #FFFFFF; border-bottom: 1px solid #E3E6EB; padding: 10px 20px; }
 .st-key-extract_bar h1 { font-size: 18px; margin: 0; padding: 0; }
 .bpe-note { font-size: 12px; color: #4B5363; background: #F9FAFB; border: 1px solid #E3E6EB; border-radius: 6px;
   padding: 4px 10px; white-space: nowrap; }
-.st-key-ex_upper { background: #E9EBEF; }
-[data-testid="stHorizontalBlock"]:has(> div .st-key-ex_thumbs) { gap: 0; align-items: stretch; }
-.st-key-ex_thumbs { background: #FFFFFF; border-right: 1px solid #E3E6EB; padding: 10px 8px; gap: 8px;
-  min-height: calc(100vh - 496px); }
-.st-key-ex_thumbs button { min-height: 64px; align-items: flex-end; font: 11px "IBM Plex Mono", monospace; }
-.st-key-ex_page { gap: 0; }
-.st-key-ex_opened { background: #ECF0FD; border-bottom: 1px solid #D6DEF8; padding: 4px 14px; }
-.st-key-ex_opened button { min-height: 28px; padding: 0 6px; }
-.bpe-opened { color: #1B3399; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
-.st-key-ex_sheet { height: calc(100vh - 532px) !important; min-height: 220px; flex: none !important; overflow: hidden !important;
-  padding: 12px 14px; display: block !important; }
-/* the whole rendered crop, centred on the figure, fits the space: the boxed figure is always in view */
+.st-key-ex_upper { background: #E9EBEF; height: calc(100vh - 466px); min-height: 300px; overflow: hidden; }
+.st-key-ex_upper > div, [data-testid="stHorizontalBlock"]:has(> div .st-key-ex_whole) { height: 100%; gap: 0;
+  align-items: stretch; }
+.st-key-ex_whole { background: #F4F5F7; border-right: 1px solid #E3E6EB; padding: 10px 12px; gap: 8px; height: 100%;
+  overflow: hidden; }
+.st-key-ex_whole img { max-height: calc(100vh - 570px); width: auto !important; max-width: 100%; margin: 0 auto;
+  display: block; box-shadow: 0 1px 3px rgba(20, 24, 30, 0.14); }
+.st-key-ex_whole button { min-height: 30px; font-size: 12px; }
+.bpe-cap { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: #5F6775; font-weight: 600; }
+.st-key-ex_page { gap: 0; height: 100%; display: flex; flex-direction: column; }
+.st-key-ex_opened { background: #FFFFFF; border-bottom: 1px solid #E3E6EB; padding: 6px 14px; flex: none; }
+.st-key-ex_opened button { min-height: 30px; padding: 0 6px; }
+.st-key-ex_opened [data-testid="stNumberInput"] input { min-height: 30px; padding: 0 6px; text-align: center;
+  font: 12px "IBM Plex Mono", monospace; }
+.st-key-ex_opened [data-testid="stNumberInputStepDown"], .st-key-ex_opened [data-testid="stNumberInputStepUp"] {
+  display: none; }
+.st-key-ex_opened [data-testid="stTextInput"] input { min-height: 30px; font-size: 13px; }
+.bpe-opened { display: inline-block; max-width: 100%; color: #1B3399; background: #ECF0FD; border-radius: 999px;
+  padding: 3px 10px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st-key-ex_hits { background: #F9FAFB; border-bottom: 1px solid #E3E6EB; padding: 4px 14px; flex: none; }
+.st-key-ex_hits button { min-height: 24px; padding: 0 4px; font: 12px "IBM Plex Mono", monospace; }
+.st-key-ex_sheet { height: calc(100vh - 516px) !important; flex: none !important; overflow: hidden !important; padding: 14px 20px;
+  display: block !important; }
+/* the close-up strip fits the space, so the boxed figure is always in view */
 .st-key-ex_sheet [data-testid="stImage"], .st-key-ex_sheet [data-testid="stImageContainer"] { display: flex;
   justify-content: center; width: 100%; }
-.st-key-ex_sheet img { max-height: calc(100vh - 556px); width: auto !important; max-width: 100%;
-  margin: 0 auto; display: block; object-fit: contain; box-shadow: 0 1px 3px rgba(20, 24, 30, 0.12); }
+.st-key-ex_sheet img { max-height: calc(100vh - 544px); width: auto !important; max-width: 100%; margin: 0 auto;
+  display: block; object-fit: contain; box-shadow: 0 1px 3px rgba(20, 24, 30, 0.12); }
+.st-key-ex_pager { padding: 4px 14px; border-top: 1px solid #EEF0F3; }
+.st-key-ex_pager button { min-height: 26px; padding: 0 4px; }
 .st-key-ex_drawer { background: #FFFFFF; border-top: 1px solid #CDD2DA; box-shadow: 0 -2px 8px rgba(20, 24, 30, 0.06); }
 [data-testid="stHorizontalBlock"]:has(> div .st-key-ex_list) { gap: 0; align-items: stretch; }
 .st-key-ex_list { gap: 0; }

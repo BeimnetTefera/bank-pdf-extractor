@@ -20,6 +20,7 @@ from src.evidence import (
     note_calculation,
     pages_named_in,
     report_evidence,
+    typed_calculation,
 )
 from src.pdf_extractor import EXTRACTOR_VERSION, extract_candidates
 from src.pdf_render import render_crop_png
@@ -278,4 +279,18 @@ def test_nil_marked_value_is_not_treated_as_worked_out(report):
     review.approve_correction(conn, document.id, "employees", REVIEWER)
     words = PdfWords(pdf)
     assert not metric_evidence(conn, config, document.id, "employees", words).box_is_input
+    words.close()
+
+
+def test_typed_calculation_only_for_a_value_not_printed_where_it_was_recorded(settings):
+    pdf = make_pdf([[("Income statement", []), ("Profit after tax", ["3,872,832"])],
+                    [("Financial position", []), ("Total equity", ["19,475,296", "14,216,185"])]])
+    words = PdfWords(pdf)
+    note = "PAT 3,872,832 (p1) / average equity (19,475,296 + 14,216,185)/2 (p2) = 0.2299"
+    calc = typed_calculation(words, Decimal("0.2299"), "fraction", 1, True, note)  # box marked on the profit
+    assert calc.matches and [f.page for f in calc.figures] == [1, 2, 2]
+    # the typed value is the boxed number itself: printed, so not a calculation
+    assert typed_calculation(words, Decimal("3872832000"), "ETB", 1, True, "p1 = 3,872,832 Birr'000") is None
+    assert typed_calculation(words, Decimal("0.2299"), "fraction", 1, True, "read from the chart") is None
+    assert typed_calculation(words, Decimal(0), "ETB", 1, True, note) is None
     words.close()

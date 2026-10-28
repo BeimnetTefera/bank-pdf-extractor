@@ -94,7 +94,7 @@ Prints page count, text availability and raw label/value rows with their PDF pag
 4. Press **Save report**, then for each metric: **Approve** (choose the sign; confirm any warnings), **Reject** (reason), **Correct** (value, unit, reason, then *Approve correction*), or **Enter manually** for metrics not found.
 5. Your name (sidebar **Reviewer**) and the time are saved with every decision; extracted values are never overwritten.
 6. When the review is done, press **Finish extraction** (under the metric table). The figures are locked; **Reopen extraction** (under the metric table, or on the Calculations page) unlocks them, with a reason.
-7. On **Calculations**, the analyst sees the approved figures and enters the 26 calculated columns (ratios, averages, growth, "(Calculated)" values) with a note on the formula. The app calculates nothing itself.
+7. On **Calculations**, the analyst sees the approved figures and enters the 26 calculated columns (ratios, averages, growth, "(Calculated)" values) with a note on the formula. Each column shows its draft formula, the **Auto value** the app works out from the approved figures, and the difference from the entered value (and from the printed figure for profit, EPS, ROA and ROE; ⚠ above 0.5%). **Use auto values for empty columns** records the auto values with their arithmetic. The formulas are drafts in `config/export_template.yaml` (`formulas`), listed for review in `docs/calculated-formulas-draft.md`.
 8. Reopen saved reports later from **Bank Reports**. Uploading a PDF that is already saved also reopens its review.
 9. To remove a saved report (a demo, or one saved twice), press the bin next to it on **Bank Reports**, give a reason and tick the confirmation. Everything of that report is deleted, including its stored PDF unless another copy uses it; the deletion is logged under **Deleted reports**. Export the year again to update its Excel file.
 
@@ -188,7 +188,7 @@ When the report does not print a value (ROE, ROA, EPS in Birr, operating expense
 2. Each input shows where it comes from: an approved metric (page, year column, row), the prior-year column of the same row, the bank's previous-year report, or a figure you mark. A missing figure has **Mark it**: drag a box around the number (or pick it in All Figures) and save it as the input. An input that is not approved yet blocks the calculation.
 3. Check the arithmetic with the real numbers, write a note, **Save calculation**, then **Approve calculation**.
 
-The Evidence page shows the formula in words and symbols, the arithmetic, and every page that holds an input with the inputs boxed in **green**. If an input is changed later, the calculation is marked **stale**.
+The Evidence page shows the formula in words and symbols, the arithmetic, and every page that holds an input with the inputs boxed in **green**. A value typed with **Enter manually** whose note holds the arithmetic (entered before Calculate existed) is shown the same way in Extract & Review: its inputs boxed in green and a **Calculated** card in Metric Details, instead of a box on one of the inputs. If an input is changed later, the calculation is marked **stale**.
 
 ## External sources and sector data
 

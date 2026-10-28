@@ -429,3 +429,20 @@ def test_app_url_must_be_an_address(tmp_path: Path):
     path = write(tmp_path / "settings.yaml", VALID_SETTINGS + "app_url: localhost\n")
     with pytest.raises(ConfigError, match="app_url"):
         load_settings(path)
+
+
+def test_column_formulas_are_checked(config_dir: Path):
+    template = VALID_TEMPLATE + "calculated: [Profit Margin]\nformulas:\n"
+    write(config_dir / "export_template.yaml", template + "  Profit Margin: {formula: 'total_assets_etb / 2', unit: fraction}\n")
+    (f,) = load_config(config_dir, config_dir).export_template.formulas
+    assert (f.column, f.formula, f.unit, f.compare_with) == ("Profit Margin", "total_assets_etb / 2", "fraction", None)
+
+    write(config_dir / "export_template.yaml", template + "  Profit Margin: {formula: 'nope / 2', unit: fraction}\n")
+    with pytest.raises(ConfigError, match=r"unknown name\(s\) \['nope'\]"):
+        load_config(config_dir, config_dir)
+    write(config_dir / "export_template.yaml", template + "  Total Assets: {formula: '1', unit: percent}\n")
+    with pytest.raises(ConfigError, match="not a calculated column"):
+        load_export_template(config_dir / "export_template.yaml")
+    write(config_dir / "export_template.yaml", template + "  Profit Margin: {formula: '1', unit: percent}\n")
+    with pytest.raises(ConfigError, match="'unit' must be one of"):
+        load_export_template(config_dir / "export_template.yaml")

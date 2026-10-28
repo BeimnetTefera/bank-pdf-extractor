@@ -437,6 +437,18 @@ def note_calculation(note: str, pdf: PdfWords | None = None, pages: list[int | N
     return None
 
 
+def typed_calculation(pdf: PdfWords, value: Decimal | None, unit: str | None, page: int | None, boxed: bool,
+                      note: str) -> NoteCalculation | None:
+    """A typed value worked out in its note rather than printed where it was recorded (the rule of
+    metric_evidence): the note's arithmetic, with each figure found on its page. None when the value is
+    printed there (in its marked box's page, or on the pages the note names) or the note has no arithmetic."""
+    if value in (None, 0):
+        return None
+    if pdf.locate(value, unit, [page] if boxed else [page, *pages_named_in(note)]) is not None:
+        return None
+    return note_calculation(note, pdf, [*pages_named_in(note), page])
+
+
 def _note_arithmetic(expression: str, stated_text: str, pdf: PdfWords | None,
                      pages: list[int | None]) -> NoteCalculation | None:
     from src.formula import FormulaError, parse  # local: formula is only needed for notes with arithmetic

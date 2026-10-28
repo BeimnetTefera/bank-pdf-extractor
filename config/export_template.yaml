@@ -6,7 +6,15 @@
 # bank_column / year_column  where the bank name and the fiscal year (YYYY/YY) go
 # columns                    every column, in order, exactly as in the spreadsheet
 # calculated                 columns a data analyst calculates from the approved figures and
-#                            enters on the Calculations page (the app never calculates)
+#                            enters on the Calculations page
+# formulas                   per calculated column: the DRAFT formula the Calculations page works
+#                            out from the approved figures as a proposal (D-088). The analyst still
+#                            enters or accepts every value. Not agreed yet: see
+#                            docs/calculated-formulas-draft.md (the # numbers match its rows).
+#                              formula       metric ids, <metric id>_prev for the previous year,
+#                                            + - * / ( ), avg(a, b) = (a + b) / 2
+#                              unit          ETB | fraction | ratio | count (rounding and display)
+#                              compare_with  optional metric id of the printed (Reported) figure
 #
 # Every other column is extracted: a metric in metrics.yaml fills it through its
 # `export_column`, after review in Extract & Review.
@@ -41,6 +49,91 @@ calculated:
   - "ATM-to-Branch Ratio"
   - "Agents-to-Branch Ratio"
   - "Customers per Branch"
+
+formulas:
+  "Profit Before Tax (Calculated)":  # 1: assumes Total Expense excludes profit tax
+    formula: "total_revenue_etb - total_expense_etb"
+    unit: ETB
+    compare_with: profit_before_tax_etb
+  "Profit After Tax (Calculated)":  # 2: option A, from the calculated PBT
+    formula: "total_revenue_etb - total_expense_etb - profit_tax_etb"
+    unit: ETB
+    compare_with: profit_after_tax_etb
+  "Basic Earning per 1 share (EPS) (Calculated)":  # 3
+    formula: "profit_after_tax_etb / weighted_average_shares"
+    unit: ETB
+    compare_with: eps_etb
+  "Return on Assets (ROA) (Calculated)":  # 4: average assets
+    formula: "profit_after_tax_etb / avg(total_assets_etb, total_assets_etb_prev)"
+    unit: fraction
+    compare_with: roa_percent
+  "Return on Equity (ROE) (Calculated)":  # 5: average equity
+    formula: "profit_after_tax_etb / avg(total_equity_etb, total_equity_etb_prev)"
+    unit: fraction
+    compare_with: roe_percent
+  "Average Total Asset":  # 6: opening/closing average
+    formula: "avg(total_assets_etb, total_assets_etb_prev)"
+    unit: ETB
+  "Deposit Growth Rate":  # 7
+    formula: "(total_deposits_etb - total_deposits_etb_prev) / total_deposits_etb_prev"
+    unit: fraction
+  "Cost to Income Ratio":  # 8: option A
+    formula: "operating_expense_etb / operating_income_etb"
+    unit: fraction
+  "Net Interest Margin":  # 9: average total assets stand in for interest-earning assets
+    formula: "net_interest_income_etb / avg(total_assets_etb, total_assets_etb_prev)"
+    unit: fraction
+  "Asset Utilization Ratio":  # 10: average assets
+    formula: "total_revenue_etb / avg(total_assets_etb, total_assets_etb_prev)"
+    unit: fraction
+  "Profit Margin":  # 11: profit after tax
+    formula: "profit_after_tax_etb / total_revenue_etb"
+    unit: fraction
+  "Dividend Payout Ratio (Dividends Paid/Net Profit)":  # 12: this year's profit
+    formula: "dividends_paid_etb / profit_after_tax_etb"
+    unit: fraction
+  "Dividend Payout Ratio (Dividends paid/Total deposits)":  # 13
+    formula: "dividends_paid_etb / total_deposits_etb"
+    unit: fraction
+  "Loan-to-Deposit Ratio":  # 14: net loans
+    formula: "loans_and_advances_etb / total_deposits_etb"
+    unit: fraction
+  "Liquidity Ratio":  # 15: current assets, not the NBE liquid-assets ratio
+    formula: "current_assets_etb / current_liabilities_etb"
+    unit: fraction
+  "Capital Adequacy Ratio":  # 16
+    formula: "total_regulatory_capital_etb / risk_weighted_assets_etb"
+    unit: fraction
+  "Leverage Ratio":  # 17: option A, assets / equity
+    formula: "total_assets_etb / total_equity_etb"
+    unit: ratio
+  "Equity-to-Asset Ratio":  # 18
+    formula: "total_equity_etb / total_assets_etb"
+    unit: fraction
+  "Deposit per Account Holder":  # 19
+    formula: "total_deposits_etb / deposit_account_holders"
+    unit: ETB
+  "Deposit per Branch":  # 20
+    formula: "total_deposits_etb / branches"
+    unit: ETB
+  "Deposits per Employee":  # 21
+    formula: "total_deposits_etb / employees"
+    unit: ETB
+  "ATM-to-Branch Ratio":  # 22
+    formula: "atms / branches"
+    unit: ratio
+  "Agents-to-Branch Ratio":  # 23
+    formula: "agents / branches"
+    unit: ratio
+  "Customers per Branch":  # 24: deposit account holders as the customer count
+    formula: "deposit_account_holders / branches"
+    unit: ratio
+  "Digital Penetration Rate (Excluding Card Banking)":  # 25: agent banking users not extracted
+    formula: "(mobile_banking_users + internet_banking_users) / deposit_account_holders"
+    unit: fraction
+  "Digital Penetration Rate (Including Card Banking)":  # 26
+    formula: "(mobile_banking_users + internet_banking_users + cardholders) / deposit_account_holders"
+    unit: fraction
 
 columns:
   - "bank"

@@ -155,7 +155,8 @@ def _table_row(m: MetricResult, status: str, reviewed: ReviewDisplay | None) -> 
 
 def metric_details(result: MetricResult, shown: MetricCandidate | None, on_view: Callable[[RawCandidate], None],
                    on_show_page: Callable[[int], None], review_label: tuple[str, str] | None = None,
-                   rejected_keys: frozenset = frozenset(), review_controls: Callable[[], None] | None = None) -> None:
+                   rejected_keys: frozenset = frozenset(), review_controls: Callable[[], None] | None = None,
+                   no_figure_text: str = "No figure was found in this report. This is not the same as zero.") -> None:
     """review_controls, if given, is drawn right after the figure's checks, before alternatives."""
     label, color, _ = STATUS_LABELS[result.status]
     if review_label is not None:
@@ -164,7 +165,7 @@ def metric_details(result: MetricResult, shown: MetricCandidate | None, on_view:
     st.markdown(f"#### {esc(result.metric.display_name)}")
 
     if shown is None:
-        st.caption("No figure was found in this report. This is not the same as zero.")
+        st.caption(no_figure_text)
         _findings(result.findings)
         if review_controls is not None:
             review_controls()

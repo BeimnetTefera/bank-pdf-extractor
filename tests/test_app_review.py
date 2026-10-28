@@ -10,6 +10,7 @@ import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 import src.config_loader
+import src.seed_data
 from src import calculation_service, review_service
 from src.database import connect
 from src.page_marks import Mark
@@ -32,6 +33,7 @@ def app(monkeypatch, tmp_path):
         return replace(config, settings=replace(config.settings, data_dir=tmp_path / "appdata"))
 
     monkeypatch.setattr(src.config_loader, "load_config", load_with_temp_data)
+    monkeypatch.setattr(src.seed_data, "restore_seed", lambda *a, **k: False)  # start empty, not with the pilot reports
     # Like a real uploader, only the first-upload widget has a file; "Replace with another PDF" stays empty.
     monkeypatch.setattr(st, "file_uploader", lambda *a, key=None, **k: FakeUpload() if key == "upload_main" else None)
     at = AppTest.from_file(str(APP), default_timeout=60)
@@ -469,3 +471,23 @@ def test_export_from_the_review_screen(app):
     (path,) = (app.db_path.parent / "exports").glob("*.xlsx")
     assert path.name == "approved_2025-26.xlsx"
     assert any(path.name in s.value for s in app.success)
+
+
+def test_a_value_worked_out_in_its_note_shows_its_inputs_not_the_marked_box(app):
+    """Entered before Calculate existed: one input marked, the arithmetic in the note (D-089)."""
+    document_id = save(app)
+    with closing(connect(app.db_path)) as conn:
+        assets = next(c for c in load_candidates(conn, document_id, "total_assets_etb") if c.key == TOTAL_ASSETS_KEY)
+        review_service.manual_entry(conn, document_id, "employees", "Analyst A", "2222221", "count", 1,
+                                    "Worked out: 1,234,567 + 987,654 = 2,222,221 (p1)", source_bbox=assets.bbox)
+        review_service.approve_correction(conn, document_id, "employees", "Analyst A")
+    app.session_state["detail_mode"] = "metric"
+    app.session_state["selected_metric"] = "employees"
+    app.run()
+    assert not app.exception
+    assert any("**Calculated**" in m.value for m in app.markdown)
+    assert any("Gives the saved 2222221" in m.value for m in app.markdown)
+    assert len([b for b in app.button if b.label == "Show"]) == 2  # one per input, each boxed in green
+    assert not [b for b in app.button if b.label == "Show the marked box"]  # that box is only one input
+    assert not any("No figure found" in w.value for w in app.warning)
+    assert any("calculated by the reviewer" in s.value for s in app.success)

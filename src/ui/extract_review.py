@@ -16,6 +16,7 @@ import io
 import json
 from collections.abc import Callable
 from contextlib import closing
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -65,6 +66,7 @@ from src.report_period import canonical_period, suggested_period
 from src.review_service import ReviewError, ReviewState
 from src.sector_data import without_sector_metrics
 from src.calculated_entries import number_text, record_input_figure, saved_calculation
+from src.evidence import NoteCalculation, PdfWords, typed_calculation
 from src.ui import calc_panel, export_panel, metric_view, review_panel
 from src.ui.review_panel import ReviewContext
 from src.unit_normalizer import Normalized
@@ -138,6 +140,14 @@ def render(config: AppConfig, open_calculations: Callable[[str], None] | None = 
     ctx, states = _review_context(config, doc, analysis, extraction)
     marked_values = _marked_values(states)
     calc_boxes = _calculation_boxes(ctx, states)
+    if ctx is not None:
+        ctx = replace(ctx, note_calcs=_note_calculations(doc, states))
+        for metric_id, calc in ctx.note_calcs.items():  # its box holds one input, not the value
+            marked_values.pop(metric_id, None)
+            inputs = [(f.page - 1, tuple(f.box), f"{f.label} (input)" if f.label else "input")
+                      for f in calc.figures if f.page and f.box]
+            if inputs:
+                calc_boxes[metric_id] = inputs
     for metric_id, inputs in calc_boxes.items():  # a calculated metric shows its first input when picked
         marked_values.setdefault(metric_id, (inputs[0][0] + 1, inputs[0][1]))
     opened = st.session_state.pop("open_metric", None)  # Open next to a metric on Bank Reports
@@ -156,6 +166,8 @@ def render(config: AppConfig, open_calculations: Callable[[str], None] | None = 
                       open_calculations, marked_values, check_results)
     selected = find_by_key(extraction.candidates, st.session_state.get("selected_key"))
     recorded = _recorded_boxes(ctx, analysis, states)
+    for calculated in (ctx.note_calcs if ctx is not None else {}):
+        recorded.pop(calculated, None)  # shown by its inputs in green instead
     metric_id = st.session_state.get("selected_metric")
     focus_metric = metric_id if st.session_state.get("detail_mode") == "metric" else None
     if (selected is not None and focus_metric in recorded
@@ -451,6 +463,38 @@ def _calculation_boxes(ctx: ReviewContext | None, states: dict[str, ReviewState]
     return found
 
 
+def _note_calculations(doc: dict, states: dict[str, ReviewState]) -> dict[str, NoteCalculation]:
+    """Typed values worked out in their note (entered before Calculate existed, e.g. ROE from profit and
+    equity): metric -> the note's arithmetic. Their marked box holds one input, not the value (D-089)."""
+    found = {}
+    for metric_id, s in states.items():
+        if s.status == "corrected":
+            decision = proposal = s.pending
+        elif s.status == "approved" and s.accepted_decision.approves_decision_id is not None:
+            decision = s.accepted_decision
+            proposal = next((d for d in s.history if d.id == decision.approves_decision_id), None)
+        else:
+            continue
+        if proposal is None or proposal.entry_kind is not None or "=" not in (proposal.reason or ""):
+            continue
+        note = " ".join(dict.fromkeys(r for r in (proposal.reason, decision.reason) if r))
+        calc = _typed_calculation(doc["sha"], doc["bytes"], decision.reviewed_value, decision.reviewed_unit,
+                                  decision.source_page, decision.source_bbox is not None, note)
+        if calc is not None:
+            found[metric_id] = calc
+    return found
+
+
+@st.cache_data(show_spinner=False, max_entries=500)
+def _typed_calculation(sha256: str, _pdf: bytes, value: Decimal | None, unit: str | None, page: int | None,
+                       boxed: bool, note: str) -> NoteCalculation | None:
+    pdf = PdfWords(_pdf)
+    try:
+        return typed_calculation(pdf, value, unit, page, boxed, note)
+    finally:
+        pdf.close()
+
+
 def _marked_values(states: dict[str, ReviewState]) -> dict[str, tuple[int, tuple]]:
     """Metrics whose current value comes from a box the reviewer marked: metric -> (1-based page, box).
     For these the old suggested figure is no longer boxed; the marked box is the evidence."""
@@ -486,6 +530,8 @@ def _review_displays(analysis: AnalysisResult, ctx: ReviewContext | None,
         figure = next((mc for mc in m.candidates if mc.mapped.key == key_by_id.get(decision.candidate_id)), None)
         if proposal is not None and proposal.entry_kind in ENTRY_ORIGINS:
             printed = ENTRY_ORIGINS[proposal.entry_kind]
+        elif m.metric.id in ctx.note_calcs:
+            printed = "calculated (in the note)"
         elif figure is not None:
             printed = metric_view.printed_text(figure, m.metric.expected_unit)
             if proposal is not None:
@@ -1071,7 +1117,7 @@ def _pdf_viewer(doc: dict, extraction: ExtractionResult, selected: RawCandidate 
             )
         caption_col, mark_col = st.columns([3, 2], vertical_alignment="center")
         caption_col.caption(f"Page {page} of {page_count} · zoom {zoom_label} · :red[■] suggestion · "
-                            ":blue[■] selected · thin: other recorded")
+                            ":blue[■] selected · :green[■] calculation input · thin: other recorded")
         if st.session_state.pop("turn_on_marking", False):  # asked for by Calculate (Mark it)
             st.session_state.mark_mode = True
         _calc_input_banner()
@@ -1375,13 +1421,22 @@ def _details_panel(extraction: ExtractionResult, analysis: AnalysisResult, selec
             if ctx is not None and state is not None:
                 rejected_keys = frozenset(k for (mid, k), cid in ctx.candidate_ids.items()
                                           if mid == metric_id and cid in state.rejected_candidate_ids)
+            view_result, no_figure_text = result, None
+            if shown is None and state is not None and state.status in ("approved", "corrected"):
+                # a value was recorded without an extracted figure: "not found" would contradict it
+                view_result = replace(result, findings=[f for f in result.findings if f.rule_id != "NOT-FOUND"])
+                no_figure_text = ("Calculated by the reviewer from other figures (see below)."
+                                  if ctx is not None and metric_id in ctx.note_calcs else
+                                  "No printed figure was extracted for this metric; the value below was recorded "
+                                  "by a reviewer.")
             metric_view.metric_details(
-                result, shown,
+                view_result, shown,
                 on_view=lambda c: _show_candidate(c, extraction),
                 on_show_page=_go_to,
                 review_label=review_label,
                 rejected_keys=rejected_keys,
                 review_controls=lambda: review_panel.review_section(ctx, result, shown, state),
+                **({"no_figure_text": no_figure_text} if no_figure_text else {}),
             )
         elif selected is not None:
             _figure_details(extraction, selected, analysis, ctx, store)

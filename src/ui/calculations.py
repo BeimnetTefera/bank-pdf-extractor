@@ -1,7 +1,9 @@
 """Calculations page: once a report's extraction review is finished, a data analyst works out
 the calculated columns from the approved figures and enters them with a formula note.
 
-The app shows the figures and records what the analyst enters; it calculates nothing.
+The app shows the figures, proposes a value for each column that has a draft formula (worked
+out from the approved figures, D-088) with its difference from the entered and the printed
+value, and records what the analyst enters or accepts.
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ from src.review_service import ApprovedResult, ReviewError
 def render(config: AppConfig, open_report: Callable[[str], str | None]) -> None:
     st.markdown("## Calculations")
     st.caption("Work out the calculated columns from a report's approved figures and enter them with a note on "
-               "the formula. The app records them; it does not calculate.")
+               "the formula. The app proposes an auto value from a draft formula; check it before accepting.")
     with closing(connect(config.settings.database_path)) as conn:
         documents = {d["id"]: d for d in list_documents(conn)}
         status = {document_id: review_service.extraction_status(conn, document_id) for document_id in documents}
@@ -124,12 +126,22 @@ def _calculated_editor(conn: sqlite3.Connection, config: AppConfig, document_id:
     template = config.export_template
     history = calculation_service.history(conn, document_id)
     current = calculation_service.current_values(conn, document_id)
+    autos = calculation_service.auto_values(conn, config, document_id)
     st.markdown(f"**Calculated columns** · {len(current)} of {len(template.calculated)} entered")
     st.caption("Type the value the way the dataset stores it (ratios and rates as decimals, e.g. 0.0352 for "
-               "3.52%; amounts in full Birr) and how you calculated it. Clear a value to remove it.")
+               "3.52%; amounts in full Birr) and how you calculated it. Clear a value to remove it. "
+               "**Auto value** is worked out from the approved figures with a draft formula (not agreed yet); "
+               "⚠ marks a difference above 0.5%.")
+    entered = [current[c].value if c in current else None for c in template.calculated]
     original = pd.DataFrame({
         "Calculated column": list(template.calculated),
-        "Value": [_plain(current[c].value) if c in current else "" for c in template.calculated],
+        "Formula (draft)": [autos[c].words if c in autos else "" for c in template.calculated],
+        "Auto value": [_auto_text(autos.get(c)) for c in template.calculated],
+        "Value": ["" if v is None else _plain(v) for v in entered],
+        "Value − auto": [_difference(v, autos[c].value if c in autos else None)
+                         for c, v in zip(template.calculated, entered)],
+        "Auto − printed": [_difference(autos[c].value, autos[c].reported) if c in autos else ""
+                           for c in template.calculated],
         "Formula / note": [current[c].formula_note if c in current else "" for c in template.calculated],
         "Entered by": [current[c].reviewer if c in current else "" for c in template.calculated],
         "Entered at (UTC)": [current[c].created_at[:16].replace("T", " ") if c in current else ""
@@ -137,17 +149,73 @@ def _calculated_editor(conn: sqlite3.Connection, config: AppConfig, document_id:
     })
     edited = st.data_editor(
         original, hide_index=True, width="stretch", height=640, num_rows="fixed",
-        disabled=["Calculated column", "Entered by", "Entered at (UTC)"],
+        disabled=["Calculated column", "Formula (draft)", "Auto value", "Value − auto", "Auto − printed",
+                  "Entered by", "Entered at (UTC)"],
         key=f"calc_editor_{document_id}_{len(history)}",  # a fresh editor after every save
         column_config={
             "Calculated column": st.column_config.TextColumn(width=230),
+            "Formula (draft)": st.column_config.TextColumn(width=260),
+            "Auto value": st.column_config.TextColumn(width=150),
             "Value": st.column_config.TextColumn(width=110),
+            "Value − auto": st.column_config.TextColumn(width=130),
+            "Auto − printed": st.column_config.TextColumn(width=130),
             "Formula / note": st.column_config.TextColumn(width=260),
         },
     )
-    if st.button("Save calculated values", type="primary", icon=":material/save:", width="stretch"):
+    save_col, accept_col = st.columns(2)
+    if save_col.button("Save calculated values", type="primary", icon=":material/save:", width="stretch"):
         _save(config, document_id, original, edited)
+    ready = [c for c, a in autos.items() if a.value is not None and c not in current]
+    if accept_col.button(f"Use auto values for empty columns ({len(ready)})", icon=":material/auto_awesome:",
+                         width="stretch", disabled=not ready):
+        _accept_auto(config, document_id)
+    _missing_inputs(autos)
     _history(history)
+
+
+def _auto_text(auto: calculation_service.AutoValue | None) -> str:
+    if auto is None:
+        return ""
+    if auto.value is None:
+        missing = [i.label for i in auto.inputs if i.kind == "missing"]
+        return "missing: " + ", ".join(missing) if missing else "cannot calculate"
+    return _shown(auto.value, auto.formula.unit)
+
+
+def _difference(value: Decimal | None, reference: Decimal | None) -> str:
+    found = calculation_service.difference(value, reference)
+    if found is None:
+        return ""
+    gap, flagged = found
+    share = f" ({abs(gap) / abs(reference) * 100:.1f}%)" if reference else ""
+    return f"{gap.normalize():+,f}{share} " + ("⚠" if flagged else "✓")
+
+
+def _shown(value: Decimal, unit: str) -> str:
+    if unit == "fraction":
+        return f"{value.normalize():f} ({(value * 100).normalize():f}%)"
+    return f"{value.normalize():,f}"
+
+
+def _accept_auto(config: AppConfig, document_id: str) -> None:
+    try:
+        with closing(connect(config.settings.database_path)) as conn:
+            saved = calculation_service.accept_auto_values(conn, config, document_id,
+                                                           st.session_state.get("reviewer", ""))
+    except ReviewError as exc:
+        st.error(str(exc), icon=":material/error:")
+        return
+    st.toast(f"Saved {len(saved)} auto value(s)", icon=":material/check_circle:")
+    st.rerun()
+
+
+def _missing_inputs(autos: dict[str, calculation_service.AutoValue]) -> None:
+    blocked = {c: a for c, a in autos.items() if a.problems}
+    if not blocked:
+        return
+    with st.expander(f"Why some auto values are missing ({len(blocked)})"):
+        for column, auto in blocked.items():
+            st.caption(f"**{column}**: " + " ".join(dict.fromkeys(auto.problems)))
 
 
 def _save(config: AppConfig, document_id: str, original: pd.DataFrame, edited: pd.DataFrame) -> None:

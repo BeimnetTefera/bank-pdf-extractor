@@ -68,17 +68,31 @@ class InputFigure:
 
 
 @dataclass(frozen=True)
+class ColumnFormula:
+    """The draft formula of a calculated column (export_template.yaml `formulas`, D-088)."""
+
+    column: str
+    formula: str
+    unit: str  # ETB | fraction | ratio | count: how the result is rounded and shown
+    compare_with: str | None = None  # metric id of the printed (Reported) figure to compare with
+
+
+@dataclass(frozen=True)
 class ExportTemplate:
     """Column layout of the export's Approved Data sheet (export_template.yaml)."""
 
     bank_column: str
     year_column: str
     columns: tuple[str, ...]
-    calculated: tuple[str, ...] = ()  # entered by an analyst after extraction, never calculated by the app
+    calculated: tuple[str, ...] = ()  # entered by an analyst after extraction (the app proposes a value, D-088)
+    formulas: tuple[ColumnFormula, ...] = ()
 
     def extracted(self) -> tuple[str, ...]:
         """Data columns filled from the report (everything except bank, year and calculated)."""
         return tuple(c for c in self.columns if c not in (self.bank_column, self.year_column, *self.calculated))
+
+    def formula(self, column: str) -> ColumnFormula | None:
+        return next((f for f in self.formulas if f.column == column), None)
 
 
 @dataclass(frozen=True)
@@ -189,6 +203,7 @@ def load_config(config_dir: Path = CONFIG_DIR, project_root: Path = PROJECT_ROOT
     checks = load_checks(config_dir / "checks.yaml", metrics)
     figures = load_input_figures(config_dir / "metrics.yaml", metric_ids)
     _check_formulas(config_dir / "metrics.yaml", metrics, figures)
+    _check_column_formulas(config_dir / "export_template.yaml", template, metrics, figures)
     return AppConfig(metrics=metrics, mappings=mappings, settings=settings, banks=banks, export_template=template,
                      checks=checks, learned_aliases=learned, config_dir=config_dir, input_figures=figures)
 
@@ -346,6 +361,30 @@ def _check_formulas(path: Path, metrics: tuple[MetricDefinition, ...], figures: 
                           "or ids from input_figures.")
         if m.id in formula.names:
             errors.append(f"{m.id}: formula uses the metric itself.")
+    _raise_if_errors(path, errors)
+
+
+def _check_column_formulas(path: Path, template: ExportTemplate, metrics: tuple[MetricDefinition, ...],
+                           figures: tuple[InputFigure, ...]) -> None:
+    from src.formula import FormulaError, parse
+
+    known = known_formula_names(metrics, figures)
+    metric_ids = {m.id for m in metrics}
+    errors = []
+    for f in template.formulas:
+        try:
+            target, formula = parse(f.formula)
+        except FormulaError as exc:
+            errors.append(f"formula of '{f.column}' cannot be read: {exc}")
+            continue
+        if target is not None:
+            errors.append(f"formula of '{f.column}': leave out the '{target} =' part.")
+        unknown = [n for n in formula.names if n not in known]
+        if unknown:
+            errors.append(f"formula of '{f.column}' uses unknown name(s) {unknown}: use metric ids, <metric>_prev "
+                          "or ids from input_figures.")
+        if f.compare_with is not None and f.compare_with not in metric_ids:
+            errors.append(f"formula of '{f.column}': compare_with '{f.compare_with}' is not a metric id.")
     _raise_if_errors(path, errors)
 
 
@@ -511,9 +550,9 @@ def load_export_template(path: Path) -> ExportTemplate:
     if not isinstance(raw, dict):
         raise ConfigError(f"{path.name}: expected 'bank_column', 'year_column' and a 'columns' list.")
     errors: list[str] = []
-    unknown = sorted(set(raw) - {"bank_column", "year_column", "columns", "calculated"})
+    unknown = sorted(set(raw) - {"bank_column", "year_column", "columns", "calculated", "formulas"})
     if unknown:
-        errors.append(f"unknown key(s) {unknown}. Allowed: bank_column, year_column, columns, calculated.")
+        errors.append(f"unknown key(s) {unknown}. Allowed: bank_column, year_column, columns, calculated, formulas.")
     columns = raw.get("columns")
     if not isinstance(columns, list) or not columns or not all(_is_non_blank_str(c) for c in columns):
         errors.append("'columns' must be a non-empty list of column names.")
@@ -535,8 +574,46 @@ def load_export_template(path: Path) -> ExportTemplate:
             errors.append(f"calculated column '{column}' is not in 'columns'.")
         elif column in (raw.get("bank_column"), raw.get("year_column")):
             errors.append(f"calculated column '{column}' is the bank or year column.")
+    formulas = _column_formulas(raw.get("formulas"), calculated, errors)
     _raise_if_errors(path, errors)
-    return ExportTemplate(raw["bank_column"], raw["year_column"], tuple(columns), tuple(dict.fromkeys(calculated)))
+    return ExportTemplate(raw["bank_column"], raw["year_column"], tuple(columns), tuple(dict.fromkeys(calculated)),
+                          formulas)
+
+
+_FORMULA_UNITS = ("ETB", "fraction", "ratio", "count")
+
+
+def _column_formulas(raw: object, calculated: list, errors: list[str]) -> tuple[ColumnFormula, ...]:
+    """The `formulas` mapping: calculated column -> {formula, unit, compare_with?}."""
+    if raw is None:
+        return ()
+    if not isinstance(raw, dict):
+        errors.append("'formulas' must map calculated column names to {formula, unit, compare_with}.")
+        return ()
+    found = []
+    for column, entry in raw.items():
+        where = f"formula of '{column}'"
+        if column not in calculated:
+            errors.append(f"{where}: '{column}' is not a calculated column.")
+            continue
+        if not isinstance(entry, dict):
+            errors.append(f"{where}: expected 'formula' and 'unit'.")
+            continue
+        unknown = sorted(set(entry) - {"formula", "unit", "compare_with"})
+        if unknown:
+            errors.append(f"{where}: unknown key(s) {unknown}. Allowed: formula, unit, compare_with.")
+        if not _is_non_blank_str(entry.get("formula")):
+            errors.append(f"{where}: 'formula' must be a non-empty text value.")
+            continue
+        if entry.get("unit") not in _FORMULA_UNITS:
+            errors.append(f"{where}: 'unit' must be one of {list(_FORMULA_UNITS)}.")
+            continue
+        compare = entry.get("compare_with")
+        if compare is not None and not _is_non_blank_str(compare):
+            errors.append(f"{where}: 'compare_with' must be a metric id (or be left out).")
+            continue
+        found.append(ColumnFormula(column, entry["formula"].strip(), entry["unit"], compare))
+    return tuple(found)
 
 
 def _check_export_columns(path: Path, metrics: tuple[MetricDefinition, ...], template: ExportTemplate) -> None:

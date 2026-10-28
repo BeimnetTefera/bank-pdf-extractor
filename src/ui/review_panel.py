@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from contextlib import closing
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -22,6 +22,7 @@ from src.unit_normalizer import unit_label
 from src.ui import routes, source_form
 from src.candidate_queries import CandidateKey
 from src.database import connect
+from src.evidence import NoteCalculation
 from src.models import MetricCandidate, MetricResult
 from src.project_service import get_candidate
 from src.review_service import ReviewError, ReviewState
@@ -44,6 +45,8 @@ class ReviewContext:
     extraction_finished: bool = False  # figures locked until the extraction review is reopened
     show_box: Callable[[int, tuple], None] | None = None  # move the page viewer to (1-based page, box)
     config: AppConfig | None = None  # metrics, formulas and labels, for Calculate
+    # metric -> arithmetic of a typed value worked out in its note: its box holds an input, not the value
+    note_calcs: dict[str, NoteCalculation] = field(default_factory=dict)
 
 
 def value_and_unit(value: Decimal, unit: str | None) -> tuple[str, str]:
@@ -71,14 +74,14 @@ def review_section(ctx: ReviewContext | None, result: MetricResult, shown: Metri
     routes.link("evidence", "View evidence page", ":material/verified:", report=ctx.document_id, metric=metric_id)
     if ctx.extraction_finished:
         if state.status == "approved":
-            _approved_box(ctx, state)
+            _approved_box(ctx, state, metric_id)
         elif state.status == "not_reported":
             _not_reported_box(state)
         st.caption(":material/lock: The extraction review is finished, so figures are locked. "
                    "Reopen it to change them.")
         reopen_extraction(ctx, key="metric")
     elif state.status == "approved":
-        _approved_box(ctx, state)
+        _approved_box(ctx, state, metric_id)
         _reopen(ctx, metric_id, "Reopen")
     elif state.status == "not_reported":
         _not_reported_box(state)
@@ -373,14 +376,18 @@ def _pending_box(ctx: ReviewContext, result: MetricResult, state: ReviewState) -
     kind = ("Not reported" if p.entry_kind == "not_reported" else "Calculation" if p.entry_kind == "calculated" else
             "External source" if p.entry_kind == "external" else
             "Manual entry" if p.decision == "manual_entry" else "Correction")
-    where = f" · PDF page {p.source_page}" if p.source_page else ""
-    boxed = " · box marked on the page" if p.source_bbox else ""
+    metric_id = result.metric.id
+    calc = ctx.note_calcs.get(metric_id)
+    where = f" · PDF page {p.source_page}" if p.source_page and calc is None else ""
+    boxed = " · box marked on the page" if p.source_bbox and calc is None else ""
     shown = format_value(p.reviewed_value, p.reviewed_unit) if p.reviewed_value is not None else "no value (not reported)"
     st.info(f"**{kind} awaiting approval:** {shown}{where}{boxed}  \n"
             f"by {p.reviewer} · {p.created_at[:16].replace('T', ' ')} UTC  \nReason: {p.reason}",
             icon=":material/edit:")
-    _show_box_button(ctx, p, f"pending_{p.id}")
-    metric_id = result.metric.id
+    if calc is not None:
+        _note_calc_card(ctx, calc, f"pending_{p.id}")
+    else:
+        _show_box_button(ctx, p, f"pending_{p.id}")
     with closing(connect(ctx.db_path)) as conn:
         warnings = review.relevant_warnings(conn, ctx.document_id, metric_id)
     acknowledged = True
@@ -469,17 +476,45 @@ def _not_reported_box(state: ReviewState) -> None:
             f"Approved by {a.reviewer} · {a.created_at[:16].replace('T', ' ')} UTC", icon=":material/do_not_disturb_on:")
 
 
-def _approved_box(ctx: ReviewContext, state: ReviewState) -> None:
+def _approved_box(ctx: ReviewContext, state: ReviewState, metric_id: str) -> None:
     a = state.accepted_decision
     proposal = next((d for d in state.history if d.id == a.approves_decision_id), None)
+    calc = ctx.note_calcs.get(metric_id)
     origin = ("value from an external source" if proposal is not None and proposal.entry_kind == "external" else
+              "calculated by the reviewer (arithmetic in the note)" if calc is not None else
               "human-entered value" if state.is_human_entered else "extracted figure")
     sign = " · recorded as a positive amount" if a.sign_choice == "positive" else ""
-    boxed = f" · box marked on PDF page {a.source_page}" if a.source_bbox else ""
+    boxed = f" · box marked on PDF page {a.source_page}" if a.source_bbox and calc is None else ""
     st.success(f"**Approved:** {format_value(state.accepted_value, state.accepted_unit)}  \n"
                f"{origin}{sign}{boxed} · by {a.reviewer} · {a.created_at[:16].replace('T', ' ')} UTC",
                icon=":material/check_circle:")
-    _show_box_button(ctx, a, f"approved_{a.id}")
+    if calc is not None:
+        _note_calc_card(ctx, calc, f"approved_{a.id}")
+    else:
+        _show_box_button(ctx, a, f"approved_{a.id}")
+
+
+def _note_calc_card(ctx: ReviewContext, calc: NoteCalculation, key: str) -> None:
+    """A typed value worked out in its note: the arithmetic, whether it gives the value, and each input
+    (boxed in green on the page) with a button to show it. Replaces Show the marked box, whose box
+    holds only one of the inputs."""
+    with st.container(border=True):
+        st.markdown(":material/calculate: **Calculated** · from the arithmetic in the note")
+        st.code(calc.arithmetic, language=None, wrap_lines=True)
+        if calc.matches:
+            st.markdown(f":green[:material/check_circle: Gives the saved {calc.stated:f} (within rounding).]")
+        else:
+            st.markdown(f":red[:material/error: Gives {calc.result.quantize(Decimal('0.0001')).normalize():f}, "
+                        f"not the stated {calc.stated:f}. Check the note and the figures.]")
+        for i, f in enumerate(calc.figures):
+            text_col, button_col = st.columns([3, 1], vertical_alignment="center")
+            where = f"PDF page {f.page}" if f.page else "not found on the pages the note names"
+            text_col.caption(f"{f.label or 'Figure'}: {f.printed} · {where}")
+            if f.page and f.box is not None and ctx.show_box is not None:
+                button_col.button("Show", icon=":material/crop_free:", key=f"note_fig_{key}_{i}", width="stretch",
+                                  on_click=ctx.show_box, args=(f.page, f.box))
+        st.caption(":green[■] The inputs are boxed in green on their pages. To store them with the value, use "
+                   "Calculate from other figures.")
 
 
 def _show_box_button(ctx: ReviewContext, decision: review.Decision, key: str) -> None:

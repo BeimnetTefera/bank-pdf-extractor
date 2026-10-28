@@ -39,8 +39,7 @@ def extract_page() -> None:
     if st.session_state.get("workbench"):  # the parked full workbench (docs/redesign-backlog.md), kept for its tests
         extract_review.render(config, open_calculations=_open_calculations)
         return
-    extract_page_ui.render(config, open_review=lambda: st.switch_page(app_pages[7]),
-                           open_reports=lambda: st.switch_page(app_pages[3]))
+    extract_page_ui.render(config, open_review=lambda: st.switch_page(app_pages[7]), open_reports=_reports_for_extract)
 
 
 def review() -> None:
@@ -102,11 +101,17 @@ routes.register(extract_review=app_pages[1], review=app_pages[7], bank_reports=a
 
 
 def _open_report(document_id: str) -> str | None:
-    """Open a saved report on the Review page."""
+    """Open a saved report on the Review page, or back on Extract when Reports was reached from there."""
     error = extract_review.open_saved(config, document_id)
     if error is None:
-        st.switch_page(app_pages[7])
+        st.switch_page(app_pages[1] if st.session_state.pop("reports_from_extract", False) else app_pages[7])
     return error
+
+
+def _reports_for_extract() -> None:
+    """Extract's "Open Reports": the report picked there opens back on Extract, not on Review."""
+    st.session_state.reports_from_extract = True
+    st.switch_page(app_pages[3])
 
 
 def _new_report() -> None:
@@ -136,6 +141,8 @@ def _open_hit(hit) -> None:
 
 # Our own frame (top bar and menu, D-092), so Streamlit's menu is hidden.
 navigation = st.navigation([*app_pages, *evidence_pages.values()], position="hidden")
+if navigation.url_path != app_pages[3].url_path:
+    st.session_state.pop("reports_from_extract", None)  # left Reports another way: opening goes to Review again
 
 # The address form ?page=evidence&report=<id>&metric=<id> leads to the Evidence pages too.
 if st.query_params.get("page") in evidence_pages:

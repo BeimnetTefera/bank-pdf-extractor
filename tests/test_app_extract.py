@@ -123,3 +123,15 @@ def test_a_page_number_can_be_typed_and_the_whole_page_opened_large(app):
     assert not page.exception and page.session_state["viewer_page"] == 1
     page.button(key="ex_full").click().run()
     assert not page.exception
+
+
+def test_a_report_opened_from_extracts_open_reports_comes_back_to_extract(app):
+    document_id = save(app)
+    app.session_state["workbench"] = False  # the redesigned Extract page
+    del app.session_state["doc"]
+    app.run()
+    next(b for b in app.button if b.label == "Open Reports").click().run()
+    next(b for b in app.button if b.key == f"open_{document_id}").click().run()
+    assert not app.exception
+    assert any(b.key == "ex_go_review" for b in app.button)  # on Extract, not Review
+    assert "reports_from_extract" not in app.session_state

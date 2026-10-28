@@ -25,6 +25,11 @@ together once the redesign is finished.
 | All figures list | Every number read from the PDF, filtered by page, year or value, with *Use this figure for a metric* | All Figures tab of the old Extract | `extract_review._figures_table`, `_figure_details` (the top search finds printed figures meanwhile) |
 | Approve all verified | Approves in one go the suggested figures with no warning, converted and positive, after a tick | Old Extract, under the metric table | `extract_review._approve_all_verified`, `bulk_review` (D-072) |
 | Full validation log | Every finding of the analysis, notes included, as one list | Validation Log tab of the old Extract | `metric_view.validation_log` (Extract now lists one status per metric, D-094) |
+| "Opened for" label | Named the metric whose figure the Extract page opened at | Extract toolbar, left of the search box (dropped with the Extract mockup of 2026-10-28) | `extract_page._toolbar` before 2026-10-28 (git history) |
+| Actions under an approved figure | Open evidence record, Recalculate, Reopen, and ‹ Previous / Next: metric (Alt+↑ / Alt+↓) | Review, right column, under an approved figure (dropped with the Review mockup of 2026-10-28); still shown for a metric to review | `review_panel._reopen`, `calc_panel.calculate_section`, `review_page._steps`; the Evidence page is still reachable by its address |
+| Warnings filter | Lists only the metrics whose figure raised a warning | Review queue filters | `review_page` (status `flagged`); such metrics are under *To review* |
+| Value in the queue | The approved or suggested value beside each metric in the Review queue | Review queue | `review_page._queue_value` before 2026-10-28 (git history) |
+| Box legend | "Red: the suggestion you are checking · thin blue: figures already found on this page" | Under the page on Review | removed; recorded figures are now boxed in plain blue without names, as in the mockup; a suggestion being checked is still red |
 
 Merging duplicate reports is not parked: the mockup's **Review duplicates** button on Reports
 opens it.

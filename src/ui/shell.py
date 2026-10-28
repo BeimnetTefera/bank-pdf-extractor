@@ -1,6 +1,6 @@
 """The frame around every page, as in the redesign mockup (D-092): a top bar with the product name,
-the search box and the reviewer, then the menu on the left (two groups with counts; icons only on
-the Review page) and the page itself.
+the search box and the reviewer, then the menu on the left (two groups split by a line, with counts;
+icons only as a rail) and the page itself.
 
 Streamlit's own sidebar is not used, so the top bar can run across the whole window.
 """
@@ -32,7 +32,7 @@ def top_bar(config: AppConfig) -> str:
                                       label_visibility="collapsed", icon=":material/search:")
         name = st.session_state.get("reviewer", "") or "no name"
         me_col.html(f'<div class="bpe-me"><span class="bpe-avatar-lg">{escape(style.initials(name))}</span>'
-                    f'{escape(name)} · Reviewer</div>')
+                    f'{escape(name)} · Reviewer{style.icon("expand_more")}</div>')
     return query or ""
 
 
@@ -44,20 +44,26 @@ def menu_counts(config: AppConfig) -> tuple[int, int]:
     return len(documents), waiting
 
 
-def menu(groups: Sequence[tuple[str, Sequence[tuple[object, str | None]]]], rail: bool) -> None:
-    """The left menu: (group label, [(page, count text)]). As a rail: icons only, no labels or counts."""
+def menu(groups: Sequence[tuple[str, Sequence[tuple[object, str | None]]]], rail: bool, current: object = None,
+         titles: bool = False) -> None:
+    """The left menu: (group label, [(page, count text)]); the current page is marked. With titles each
+    group is named, else the groups are split by a thin line. As a rail: icons only, no counts."""
     with st.container(key="nav_rail" if rail else "nav"):
-        for label, pages in groups:
-            if not rail:
+        for at, (label, pages) in enumerate(groups):
+            if titles and not rail:
                 st.html(f'<div class="bpe-group">{escape(label)}</div>')
+            elif at:
+                st.html('<div class="bpe-navsep"></div>')
             for page, count in pages:
-                if rail:
-                    st.page_link(page, label=" ", help=page.title, width="stretch")
-                    continue
-                link_col, count_col = st.columns([5, 1], vertical_alignment="center", gap=None)
-                link_col.page_link(page, width="stretch")
-                if count:
-                    count_col.html(f'<span class="bpe-count">{escape(count)}</span>')
+                on = current is not None and page.url_path == current.url_path
+                with st.container(key=f"navitem_{page.url_path or 'home'}{'_on' if on else ''}"):
+                    if rail:
+                        st.page_link(page, label=" ", help=page.title, width="stretch")
+                        continue
+                    link_col, count_col = st.columns([5, 1], vertical_alignment="center", gap=None)
+                    link_col.page_link(page, width="stretch")
+                    if count:
+                        count_col.html(f'<span class="bpe-count">{escape(count)}</span>')
 
 
 def search_results(config: AppConfig, query: str, open_hit: Callable[[search.Hit], None]) -> None:

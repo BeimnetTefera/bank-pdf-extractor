@@ -61,7 +61,7 @@ def test_clicking_a_row_opens_its_page_with_the_figure_boxed(app):
     assert not page.exception
     assert page.session_state["selected_metric"] == "total_assets_etb"
     assert page.session_state["viewer_page"] == 1
-    assert "Opened for <b>Total assets</b>" in "".join(h.proto.body for h in page.get("html"))
+    assert page.session_state["selected_key"] is not None  # its figure is the one boxed on the page
     page.button(key="ex_open_review").click().run()
     assert page.session_state["review_opened"]
 

@@ -80,11 +80,11 @@ def evidence_summary() -> None:
 
 app_pages = [
     st.Page(home_page, title="Getting started", icon=":material/school:", url_path="home", visibility="hidden"),
-    st.Page(extract_page, title="Extract", icon=":material/fact_check:", url_path="extract_review", default=True),
+    st.Page(extract_page, title="Extract", icon=":material/list_alt:", url_path="extract_review", default=True),
     st.Page(calculations_page, title="Calculations", icon=":material/calculate:", url_path="calculations"),
     st.Page(bank_reports_page, title="Reports", icon=":material/description:", url_path="bank_reports"),
-    st.Page(sector_data_page, title="Sector data", icon=":material/public:", url_path="sector_data"),
-    st.Page(templates_page, title="Templates", icon=":material/notes:", url_path="templates"),
+    st.Page(sector_data_page, title="Sector data", icon=":material/monitoring:", url_path="sector_data"),
+    st.Page(templates_page, title="Templates", icon=":material/article:", url_path="templates"),
     st.Page(settings_page, title="Settings", icon=":material/settings:", url_path="settings"),
     st.Page(review, title="Review", icon=":material/check_box:", url_path="review"),
     st.Page(new_report_page, title="New report", icon=":material/add:", url_path="new_report", visibility="hidden"),
@@ -153,15 +153,18 @@ if st.session_state.pop("goto_review", False):
 
 st.session_state.reviewer = st.session_state.get("reviewer", config.settings.default_reviewer)
 reports_count, waiting_count = shell.menu_counts(config)
-# The menu in two groups, as in the redesign mockup: the daily work, then the setup.
-MENU = (("Workspace", ((app_pages[3], str(reports_count)), (app_pages[1], None), (app_pages[7], str(waiting_count)),
+# The menu in two groups: the daily work, then the setup. The approved mockups differ (2026-10-28): Review's
+# names the groups and counts the reports; Extract's (and every other page's) splits them by a line.
+on_review = navigation.url_path == app_pages[7].url_path
+MENU = (("Workspace", ((app_pages[3], str(reports_count) if on_review else None), (app_pages[1], None),
+                       (app_pages[7], str(waiting_count)),
                        (app_pages[2], None), (app_pages[4], None))),
         ("Setup", ((app_pages[5], None), (app_pages[6], None))))
 
 query = shell.top_bar(config)
 nav_col, page_col = st.columns([1, 6], gap=None)
 with nav_col:
-    shell.menu(MENU, rail=False)  # the full menu on every page, Review too (user feedback 2026-10-28)
+    shell.menu(MENU, rail=False, current=navigation, titles=on_review)  # the full menu on every page, Review too (user feedback 2026-10-28)
 with page_col, st.container(key="page"):
     shell.search_results(config, query, _open_hit)
     navigation.run()

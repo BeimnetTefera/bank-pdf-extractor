@@ -66,6 +66,8 @@ def test_review_page_steps_to_a_metric_and_approves_it(app):
     assert not page.exception
     assert f"{BANK} · 2025/26" in html_text(page) and "approved" in html_text(page)
     page.button(key="metric_next").click().run()  # Start: the first metric to review
+    assert not page.exception and page.session_state["selected_metric"]
+    page.button(key="q_total_assets_etb").click().run()  # from the queue (Financial performance)
     assert not page.exception and page.session_state["selected_metric"] == "total_assets_etb"
     approve = page.button(key="approve_main")
     assert approve.label == "Approve 1,234,567"
@@ -94,18 +96,20 @@ def test_new_report_reads_saves_and_opens_the_review(tmp_path):
     assert (doc["bank_name"], doc["reporting_period"]) == (BANK, "2025/26")
 
 
-def test_review_queue_is_paged_and_follows_the_metric_picked(app):
+def test_review_queue_groups_fold_and_open(app):
     document_id = save(app)
     page = AppTest.from_function(review_screen, args=(str(app.db_path.parent), document_id), default_timeout=60)
     page.session_state["reviewer"] = "Analyst A"
+    page.session_state["review_filter"] = "all"
     page.run()
     assert not page.exception
-    shown = [b for b in page.button if (b.key or "").startswith("q_")]
-    assert 0 < len(shown) <= 12  # one page of the queue
-    page.button(key="review_qpage_next").click().run()
-    assert page.session_state["review_qpage"] == 1
-    page.button(key="metric_next").click().run()  # the first metric is on page 1: the queue goes back to it
-    assert page.session_state["review_qpage"] == 0 and not page.exception
+    groups = [b for b in page.button if (b.key or "").startswith("rv_group_")]
+    assert groups and groups[0].label == "Network and customers"
+    before = len([b for b in page.button if (b.key or "").startswith("q_")])
+    groups[0].click().run()  # fold the first group: its metrics leave the list
+    assert len([b for b in page.button if (b.key or "").startswith("q_")]) < before
+    page.button(key=groups[0].key).click().run()  # open it again
+    assert len([b for b in page.button if (b.key or "").startswith("q_")]) == before and not page.exception
 
 
 def test_review_keeps_working_when_the_extract_fields_are_forgotten(app):

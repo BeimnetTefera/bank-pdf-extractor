@@ -1,7 +1,8 @@
-"""Review: one saved report, metric by metric, as in the redesign mockup (screens 3 and 4, D-092).
+"""Review: one saved report, metric by metric, as in the approved mockup (2026-10-28).
 
-Left: the metric queue, grouped by statement, with filters. Middle: the PDF page (and, for a
-calculated value, close-ups of its inputs). Right: the decision for the selected metric, then
+Left: the metric queue in four folding groups, with filters. Middle: the PDF page (and, for a
+calculated value, close-ups of its inputs). Right: the selected metric: an approved one shows its
+source, extraction details and a snippet of the page; one to review shows the decision, then
 Previous / Next. All rules are the review engine's (review_service, calculated_entries); the
 figures and boxes come from extract_review.prepare, the same as the Extract page.
 """
@@ -24,10 +25,11 @@ from src import review_service
 from src.calculated_entries import number_text, saved_calculation
 from src.config_loader import AppConfig
 from src.database import connect
+from src.pdf_render import render_band_png
 from src.models import MetricCandidate, MetricResult
 from src.project_service import get_document
 from src.review_service import ReviewError, ReviewState
-from src.ui import calc_panel, extract_review, metric_view, review_panel, routes, shell, style
+from src.ui import calc_panel, extract_review, metric_view, review_panel, style
 from src.ui.extract_review import Prepared
 from src.unit_normalizer import unit_label
 from src.value_input import stored_on_approval
@@ -48,14 +50,22 @@ GROUPS = {
                               "mobile_and_internet_banking_users", "cardholders"),
     "Sector": ("sector_total_deposits_etb",),
 }
+# The Review queue's groups, as in the mockup; anything else goes under "Other".
+REVIEW_GROUPS = {
+    "Network and customers": GROUPS["Network and customers"] + GROUPS["Sector"],
+    "Financial performance": ("total_assets_etb", "total_assets_previous_year_etb") + GROUPS["Profit or loss"],
+    "Liquidity and capital": tuple(m for m in GROUPS["Financial position"]
+                                   if m not in ("total_assets_etb", "total_assets_previous_year_etb")),
+    "Profitability": GROUPS["Profitability"],
+}
 TO_REVIEW = ("needs_review", "flagged", "not_found", "corrected")
-FILTERS = ("to_review", "warnings", "calculated", "approved", "all")
-FILTER_LABELS = {"to_review": "To review", "warnings": "Warnings", "calculated": "Calculated",
-                 "approved": "Approved", "all": "All"}
-DOTS = {"needs_review": ":orange[●]", "flagged": ":red[●]", "not_found": ":gray[○]", "corrected": ":blue[●]",
-        "approved": ":green[●]", "not_reported": ":gray[●]", "calculated": ":blue[●]"}
+FILTERS = ("to_review", "calculated", "approved", "all")
+FILTER_LABELS = {"to_review": "To review", "calculated": "Calculated", "approved": "Approved", "all": "All"}
+# The status beside each metric in the queue: (words, colour)
+QUEUE_STATUS = {"needs_review": ("To review", "blue"), "flagged": ("To review", "blue"),
+                "corrected": ("To review", "blue"), "not_found": ("not found", "grey"),
+                "approved": ("Approved", "green"), "not_reported": ("not reported", "grey")}
 ZOOMS = list(extract_review.ZOOM_LEVELS)
-QUEUE_PAGE = 12  # metrics per page of the queue
 
 
 def render(config: AppConfig, open_calculations: Callable[[str], None] | None = None,
@@ -110,16 +120,16 @@ def _work_bar(p: Prepared, open_calculations: Callable[[str], None] | None) -> N
     total = len(p.states)
     bank = st.session_state.bank or ""
     with st.container(key="review_bar"):
-        title_col, progress_col, tools_col, finish_col = st.columns([4, 2.4, 1.2, 1.4], vertical_alignment="center")
-        title_col.html(f'<div class="bpe-crumb">Reports / {escape(bank)}</div>'
-                       f'<h1 style="font-size:18px;font-weight:600;margin:0">{escape(bank)} · '
-                       f'{escape(extract_review._report_year_label())}</h1>')
+        title_col, progress_col, tools_col, finish_col = st.columns([4.3, 2.6, 1.45, 1.6], vertical_alignment="center")
+        year = escape(extract_review._report_year_label())
+        title_col.html(f'<div class="bpe-crumb">Reports / {escape(bank)} · {year}</div>'
+                       f'<h1>{escape(bank)} · {year}</h1>')
         progress_col.html(f'<div class="bpe-progress"><span class="bpe-track"><b style="width:'
                           f'{100 * approved / total if total else 0:.0f}%"></b></span>'
                           f'<span class="bpe-num">{approved} of {total} approved</span></div>')
         with tools_col:
             extract_review._report_tools(p.doc, p.ocr_needed, p.ocr_missing, p.ocr_engine, p.ocr_path)
-        with finish_col:
+        with finish_col, st.container(key="rv_finish"):
             extract_review._finish_extraction(p.ctx, p.analysis, open_calculations, p.check_results)
 
 
@@ -129,83 +139,66 @@ def _queue(p: Prepared, statuses: dict[str, str], reviews: dict[str, metric_view
     calculated = set(p.calc_boxes)
     counts = {
         "to_review": sum(s in TO_REVIEW for s in statuses.values()),
-        "warnings": sum(s == "flagged" for s in statuses.values()),
         "calculated": len(calculated),
         "approved": sum(s == "approved" for s in statuses.values()),
         "all": len(statuses),
     }
     with st.container(key="queue"):
         with st.container(key="queue_head"):
-            find = st.text_input("Find a metric", key="review_find", placeholder="Find a metric",
+            find = st.text_input("Find a metric", key="review_find", placeholder="Find a metric...",
                                  label_visibility="collapsed", icon=":material/search:")
             st.session_state.setdefault("review_filter", "to_review" if counts["to_review"] else "all")
-            chosen = st.pills("Show", [f for f in FILTERS if counts[f] or f in ("to_review", "all")],
-                              key="review_filter", format_func=lambda f: f"{FILTER_LABELS[f]} {counts[f]}",
+            chosen = st.pills("Show", FILTERS, key="review_filter", format_func=lambda f: f"{FILTER_LABELS[f]} {counts[f]}",
                               label_visibility="collapsed") or "all"
 
         def keep(metric_id: str) -> bool:
             status = statuses[metric_id]
-            return {"to_review": status in TO_REVIEW, "warnings": status == "flagged",
-                    "calculated": metric_id in calculated, "approved": status == "approved"}.get(chosen, True)
+            return {"to_review": status in TO_REVIEW, "calculated": metric_id in calculated,
+                    "approved": status == "approved"}.get(chosen, True)
 
         names = {m.metric.id: m.metric.display_name for m in p.analysis.metrics}
         shown = [m.metric.id for m in p.analysis.metrics
                  if keep(m.metric.id) and (not find or find.casefold() in names[m.metric.id].casefold())]
-        grouped = [(group, [m for m in members if m in shown]) for group, members in GROUPS.items()]
-        grouped.append(("Other", [m for m in shown if not any(m in members for members in GROUPS.values())]))
+        grouped = [(group, [m for m in members if m in shown]) for group, members in REVIEW_GROUPS.items()]
+        grouped.append(("Other", [m for m in shown if not any(m in members for members in REVIEW_GROUPS.values())]))
         selected = st.session_state.get("selected_metric")
         order = [m for _, members in grouped for m in members]  # Previous / Next go through all of them
-        group_of = {m: group for group, members in grouped for m in members}
-        if selected in order and st.session_state.get("_queue_follows") != selected:
-            st.session_state.review_qpage = order.index(selected) // QUEUE_PAGE  # show the page of the metric picked
-            st.session_state._queue_follows = selected
-        start, end = shell.pager("review_qpage", len(order), QUEUE_PAGE)
-        last_group = None
-        for metric_id in order[start:end]:
-            if group_of[metric_id] != last_group:
-                last_group = group_of[metric_id]
-                st.html(f'<div class="bpe-qgroup">{escape(last_group)}</div>')
-            _queue_row(p, metric_id, names[metric_id], statuses[metric_id], metric_id in calculated,
-                       reviews.get(metric_id), metric_id == selected)
-        if not order:
-            st.html('<div class="bpe-qmore">No metric matches. Choose another filter.</div>')
+        closed = st.session_state.setdefault("rv_closed", set())
+        with st.container(key="queue_list"):
+            for group, members in grouped:
+                if not members:
+                    continue
+                is_open = group not in closed
+                st.button(group, key=f"rv_group_{group}", type="tertiary", width="stretch",
+                          icon=":material/expand_less:" if is_open else ":material/expand_more:", icon_position="right",
+                          on_click=_fold, args=(group,))
+                if is_open:
+                    for metric_id in members:
+                        _queue_row(p, metric_id, names[metric_id], statuses[metric_id], metric_id == selected)
+            if not order:
+                st.html('<div class="bpe-qmore">No metric matches. Choose another filter.</div>')
     return order
 
 
-def _queue_row(p: Prepared, metric_id: str, name: str, status: str, calculated: bool,
-               review: metric_view.ReviewDisplay | None, selected: bool) -> None:
-    dot = DOTS["calculated"] if calculated and status == "approved" else DOTS.get(status, ":gray[●]")
+def _fold(group: str) -> None:
+    closed = st.session_state.setdefault("rv_closed", set())
+    closed.symmetric_difference_update({group})
+
+
+def _queue_row(p: Prepared, metric_id: str, name: str, status: str, selected: bool) -> None:
+    """A dot and the name; on the right the status and how many figures the app found for it."""
+    words, colour = QUEUE_STATUS.get(status, (status.replace("_", " "), "grey"))
+    found = len(p.analysis.metric(metric_id).candidates)
     with st.container(key=f"qrow_{metric_id}"):
         if selected:
-            st.html(f"<style>.st-key-qrow_{metric_id} {{ background: #F5F7FE; border-left-color: #2747C9 !important; }}"
+            st.html(f"<style>.st-key-qrow_{metric_id} {{ background: #EEF2FD; border-left-color: #2747C9 !important; }}"
                     "</style>")
-        name_col, value_col = st.columns([3, 2], vertical_alignment="center", gap=None)
+        name_col, status_col = st.columns([3.4, 1.6], vertical_alignment="center", gap=None)
+        dot = ":gray[●]" if status in ("not_found", "not_reported") else ":blue[●]"
         name_col.button(f"{dot} {name}", key=f"q_{metric_id}", type="tertiary", width="stretch",
                         on_click=_select, args=(p, metric_id))
-        value_col.html(f'<div class="bpe-qval">{escape(_queue_value(p, metric_id, status, review))}</div>')
-
-
-def _queue_value(p: Prepared, metric_id: str, status: str, review: metric_view.ReviewDisplay | None) -> str:
-    state = p.states.get(metric_id)
-    if status == "approved" and state is not None and state.accepted_value is not None:
-        return _short(state.accepted_value, state.accepted_unit)
-    if status == "not_reported":
-        return "not reported"
-    primary = p.analysis.metric(metric_id).primary
-    if primary is None:
-        return "not found"
-    if primary.normalized.value is None:
-        return "check unit"
-    return primary.mapped.candidate.raw_value_text
-
-
-def _short(value: Decimal, unit: str | None) -> str:
-    """A value in the queue: 22.99% · 849 · 189,512,266 (ETB in thousands, as statements print them)."""
-    if unit == "fraction":
-        return f"{(value * 100).normalize():f}%"
-    if unit == "ETB" and value == value.to_integral_value() and abs(value) >= 1000 and value % 1000 == 0:
-        return f"{value / 1000:,.0f}"
-    return f"{value.normalize():,f}"
+        count = f'<span class="bpe-qcount">{found}</span>' if found else ""
+        status_col.html(f'<div class="bpe-qstat"><span class="{colour}"><i></i>{escape(words)}</span>{count}</div>')
 
 
 def _select(p: Prepared, metric_id: str) -> None:
@@ -222,38 +215,51 @@ def _viewer(p: Prepared, metric_id: str | None) -> None:
     st.session_state.setdefault("viewer_zoom", "100%")
     st.session_state.setdefault("pan_x", 50)
     st.session_state.setdefault("pan_y", 50)
+    st.session_state.setdefault("rv_fit", "page")
     page = st.session_state.viewer_page
     inputs = p.calc_boxes.get(metric_id, []) if metric_id else []
-    with st.container(key="viewer"):
+    if st.session_state.pop("turn_on_marking", False):
+        st.session_state.mark_mode = True
+    fit = st.session_state.rv_fit
+    with st.container(key=f"viewer_fit_{fit}"):
         if inputs:
             _inputs_strip(p, inputs)
-        with st.container(key="vbar"):
-            cols = st.columns([0.55, 0.8, 0.85, 0.55, 0.55, 0.8, 0.55, 1.4, 2.7], vertical_alignment="center")
-            cols[0].button("", icon=":material/chevron_left:", key="rv_prev_page", disabled=page <= 1,
-                           on_click=extract_review._go_to, args=(page - 1,), help="Previous page")
-            cols[1].number_input("Page", min_value=1, max_value=page_count, key="viewer_page",
-                                 label_visibility="collapsed")
-            cols[2].html(f'<span class="bpe-num bpe-minor">of {page_count}</span>')
-            cols[3].button("", icon=":material/chevron_right:", key="rv_next_page", disabled=page >= page_count,
-                           on_click=extract_review._go_to, args=(page + 1,), help="Next page")
+        with st.container(key="vbar", horizontal=True, vertical_alignment="center", gap="small"):
+            with st.container(key="rv_pagegroup", horizontal=True, vertical_alignment="center", gap=None, width="content"):
+                st.button("", icon=":material/chevron_left:", key="rv_prev_page", disabled=page <= 1,
+                          on_click=extract_review._go_to, args=(page - 1,), help="Previous page")
+                st.number_input("Page", min_value=1, max_value=page_count, key="viewer_page",
+                                label_visibility="collapsed", width=36)
+                st.html(f'<span class="bpe-num bpe-of">/ {page_count}</span>', width="content")
+                st.button("", icon=":material/chevron_right:", key="rv_next_page", disabled=page >= page_count,
+                          on_click=extract_review._go_to, args=(page + 1,), help="Next page")
+            with st.container(key=f"rv_fitpage{'_on' if fit == 'page' else ''}", width="content"):
+                st.button("Fit page", key="rv_fit_page", icon=":material/fit_screen:", on_click=_fit, args=("page",))
+            with st.container(key=f"rv_fitwidth{'_on' if fit == 'width' else ''}", width="content"):
+                st.button("Fit width", key="rv_fit_width", on_click=_fit, args=("width",))
             at = ZOOMS.index(st.session_state.viewer_zoom) if st.session_state.viewer_zoom in ZOOMS else 0
-            cols[4].button("", icon=":material/remove:", key="rv_zoom_out", disabled=at <= 0, on_click=_zoom, args=(at - 1,), help="Zoom out")
-            cols[5].html(f'<span class="bpe-num">{escape(ZOOMS[at])}</span>')
-            cols[6].button("", icon=":material/add:", key="rv_zoom_in", disabled=at >= len(ZOOMS) - 1, on_click=_zoom, args=(at + 1,),
-                           help="Zoom in")
-            cols[7].button("Fit width", key="rv_fit", on_click=_zoom, args=(0,))
-            if st.session_state.pop("turn_on_marking", False):
-                st.session_state.mark_mode = True
-            marking = cols[8].toggle("Mark a number", key="mark_mode",
-                                     help="Drag a box around the right number on the page to record it.")
+            with st.container(key="rv_zoomgroup", horizontal=True, vertical_alignment="center", gap=None, width="content"):
+                st.button("", icon=":material/remove:", key="rv_zoom_out", disabled=at <= 0, on_click=_zoom,
+                          args=(at - 1,), help="Zoom out")
+                st.html(f'<span class="bpe-num bpe-zoom">{escape(ZOOMS[at])}</span>', width="content")
+                st.button("", icon=":material/add:", key="rv_zoom_in", disabled=at >= len(ZOOMS) - 1, on_click=_zoom,
+                          args=(at + 1,), help="Zoom in")
+            full = st.button("", icon=":material/open_in_full:", key="rv_full", help="See the whole page, large")
+            st.space("stretch")
+            marking = st.session_state.get("mark_mode", False)
+            st.button("", icon=":material/highlight_alt:", key="rv_mark_toggle", type="tertiary",
+                      help="Stop marking" if marking else "Mark a number: drag a box around it on the page",
+                      on_click=st.session_state.__setitem__, args=("mark_mode", not marking))
         with st.container(key="vpage"):
-            _page_image(p, metric_id, page, marking)
-            st.html('<p class="bpe-minor" style="text-align:center;margin:8px 0 0">Red: the suggestion you are '
-                    'checking · thin blue: figures already found on this page</p>')
+            st.button("Fit page", key="rv_fit_float", icon=":material/fit_screen:", type="primary",
+                      on_click=_fit, args=("page",))
+            highlight, boxes = _page_image(p, metric_id, page, marking)
             extract_review._mark_summary()
             mark = st.session_state.get("marked")
             if mark is not None and not mark.from_figure:
                 extract_review._mark_form(mark, p.analysis, p.ctx, None)
+        if full:
+            extract_review._full_screen(doc, page, highlight, boxes)
 
 
 def _zoom(at: int) -> None:
@@ -261,7 +267,14 @@ def _zoom(at: int) -> None:
     st.session_state.zoom_chosen = True
 
 
-def _page_image(p: Prepared, metric_id: str | None, page: int, marking: bool) -> None:
+def _fit(how: str) -> None:
+    """Fit page: the whole page in view. Fit width: the page as wide as the viewer (scroll down it)."""
+    st.session_state.rv_fit = how
+    st.session_state.viewer_zoom = ZOOMS[0]
+
+
+def _page_image(p: Prepared, metric_id: str | None, page: int, marking: bool) -> tuple[tuple | None, tuple]:
+    """The page with its boxes, all in plain blue as in the mockup; returns (highlight, boxes) for full screen."""
     doc = p.doc
     primary = p.analysis.metric(metric_id).primary if metric_id else None
     state = p.states.get(metric_id) if metric_id else None
@@ -269,8 +282,7 @@ def _page_image(p: Prepared, metric_id: str | None, page: int, marking: bool) ->
     if primary is not None and metric_id not in p.recorded and (state is None or state.status != "approved"):
         selected = primary.mapped.candidate
     highlight = selected.bbox if selected is not None and selected.page_index == page - 1 else None
-    boxes = tuple((box, "focus" if m == metric_id else "recorded", name)
-                  for m, (pg, box, name) in p.recorded.items() if pg == page - 1)
+    boxes = tuple((box, "marked") for m, (pg, box, _name) in p.recorded.items() if pg == page - 1)
     boxes += tuple((box, "input", label) for pg, box, label in p.calc_boxes.get(metric_id, []) if pg == page - 1)
     mark = st.session_state.get("marked")
     if mark is not None and mark.page_index == page - 1:
@@ -287,6 +299,7 @@ def _page_image(p: Prepared, metric_id: str | None, page: int, marking: bool) ->
         extract_review._take_mark(drag, doc, p.extraction, page, view_zoom, focus, p.ocr_words)
     else:
         st.image(png, width="stretch")
+    return highlight, boxes
 
 
 def _inputs_strip(p: Prepared, inputs: list[tuple[int, tuple, str]]) -> None:
@@ -331,16 +344,7 @@ def _inspector(p: Prepared, metric_id: str | None, statuses: dict[str, str], sho
         elif state.status == "approved":
             _head(result, state, status, calculated, shown)
             _approved_detail(p, result, state, calculated)
-            with st.container(key="isec_actions"):
-                routes.link("evidence", "Open evidence record", ":material/verified:",
-                            report=p.ctx.document_id, metric=metric_id)
-                recalc_col, reopen_col = st.columns(2)
-                if recalc_col.button("Recalculate", key=f"rv_recalc_{metric_id}", width="stretch"):
-                    st.session_state.calc_open = metric_id
-                with reopen_col:
-                    review_panel._reopen(p.ctx, metric_id, "Reopen")
-                if st.session_state.get("calc_open") == metric_id:
-                    calc_panel.calculate_section(p.ctx, result, state)
+            return  # as in the mockup: no actions or Previous / Next under an approved figure
         elif state.status == "corrected":
             _head(result, state, status, calculated, shown)
             with st.container(key="isec_pending"):
@@ -363,7 +367,8 @@ def _head(result: MetricResult, state: ReviewState, status: str, calculated: boo
              "not_found": ("Not found", "muted"), "corrected": ("Awaiting approval", "warn"),
              "approved": ("Approved", "ok"), "not_reported": ("Not reported", "muted")}
     label, kind = chips.get(status, (status.replace("_", " ").capitalize(), "muted"))
-    html = style.chip(label, kind) + (" " + style.chip("Calculated", "calc") if calculated else "")
+    html = style.chip(label, kind) + (" " + style.chip("Calculated", "calc") if calculated and status != "approved"
+                                      else "")
     with st.container(key="isec_head"):
         value_html = ""
         if state.status in ("approved", "corrected") and (state.accepted_value if state.status == "approved"
@@ -374,7 +379,9 @@ def _head(result: MetricResult, state: ReviewState, status: str, calculated: boo
                 value_html = (f'<div><span class="bpe-big">{value.normalize():f}</span> '
                               f'<span class="bpe-unit">{(value * 100).normalize():f}%</span></div>')
             else:
-                value_html = f'<div><span class="bpe-big">{escape(metric_view.full_value_text(value, unit))}</span></div>'
+                number, _, unit_text = metric_view.full_value_text(value, unit).partition(" ")
+                value_html = (f'<div><span class="bpe-big">{escape(number)}</span> '
+                              f'<span class="bpe-bigunit">{escape(unit_text)}</span></div>')
         elif shown is not None and shown.normalized.value is not None:
             printed = shown.mapped.candidate.raw_value_text
             unit_text = unit_label(shown.mapped.unit) if shown.normalized.unit == "ETB" else ""
@@ -382,8 +389,7 @@ def _head(result: MetricResult, state: ReviewState, status: str, calculated: boo
                           f'{escape(unit_text)}</span></div><div class="bpe-minor bpe-num">'
                           f'= {escape(metric_view.full_value_text(shown.normalized.value, shown.normalized.unit))}</div>')
         st.html(f'<div style="display:flex;gap:6px;flex-wrap:wrap">{html}</div>'
-                f'<div style="font-size:17px;font-weight:600;margin:10px 0 6px">{escape(result.metric.display_name)}'
-                f'</div>{value_html}')
+                f'<div class="bpe-rvtitle">{escape(result.metric.display_name)}</div>{value_html}')
         if state.status == "approved" and state.accepted_decision is not None:
             a = state.accepted_decision
             st.html(f'<div class="bpe-minor">Approved by {escape(a.reviewer)} · {escape(_when(a.created_at))}</div>')
@@ -475,7 +481,8 @@ def _approve(p: Prepared, result: MetricResult, shown: MetricCandidate, candidat
 
 
 def _approved_detail(p: Prepared, result: MetricResult, state: ReviewState, calculated: bool) -> None:
-    """How an approved value came about: the calculation card, or where it is printed."""
+    """How an approved value came about: the calculation card; or, for a figure on a page, its source,
+    extraction details, a snippet of the page and the whole page."""
     metric_id = result.metric.id
     note_calc = p.ctx.note_calcs.get(metric_id)
     saved = None
@@ -483,8 +490,8 @@ def _approved_detail(p: Prepared, result: MetricResult, state: ReviewState, calc
     if proposal is not None and proposal.entry_kind == "calculated":
         with closing(connect(p.ctx.db_path)) as conn:
             saved = saved_calculation(conn, proposal.id)
-    with st.container(key="isec_how"):
-        if note_calc is not None or saved is not None:
+    if note_calc is not None or saved is not None:
+        with st.container(key="isec_how"):
             words = saved.words if saved is not None else note_calc.written
             arithmetic = saved.arithmetic if saved is not None else note_calc.arithmetic
             check = ('<span class="bpe-pass">✓ Gives the saved '
@@ -505,13 +512,99 @@ def _approved_detail(p: Prepared, result: MetricResult, state: ReviewState, calc
                     + "</tbody></table>")
             if proposal is not None and proposal.reason and saved is None:
                 st.html(f'<p class="bpe-minor" style="margin:0">Reviewer\'s note: “{escape(proposal.reason)}”</p>')
-            return
-        a = state.accepted_decision
-        rows = [("Source", "human-entered value" if state.is_human_entered else "extracted figure")]
-        if a.source_page:
-            rows.append(("Page", f"PDF page {a.source_page}"))
-        st.html('<dl class="bpe-dl">' + "".join(f"<dt>{escape(k)}</dt><dd>{escape(v)}</dd>" for k, v in rows)
-                + "</dl>")
+        return
+    a = state.accepted_decision
+    where = p.recorded.get(metric_id)  # (page index, box, name) of the approved figure
+    page_count = p.extraction.page_count
+    source_page = where[0] + 1 if where else a.source_page
+    with st.container(key="isec_source"):
+        st.html('<dl class="bpe-dl">'
+                f'<dt>Source</dt><dd>{escape(_source_name())}</dd>'
+                f'<dt>Evidence type</dt><dd>{style.icon("description")} '
+                f'{"PDF page" if source_page else "Typed value"}</dd></dl>')
+        if source_page:
+            label_col, page_col = st.columns([1, 2.2], vertical_alignment="center")
+            label_col.html('<span class="bpe-dt">Page</span>')
+            with page_col, st.container(key="rv_srcpage", horizontal=True, vertical_alignment="center", gap=None):
+                shown = st.session_state.viewer_page
+                st.html(f'<span class="bpe-num">{shown} / {page_count}</span>', width="stretch")
+                st.button("", icon=":material/chevron_left:", key="rv_src_prev", disabled=shown <= 1, type="tertiary",
+                          on_click=extract_review._go_to, args=(shown - 1,), help="Previous page")
+                st.button("", icon=":material/chevron_right:", key="rv_src_next", disabled=shown >= page_count,
+                          type="tertiary", on_click=extract_review._go_to, args=(shown + 1,), help="Next page")
+            st.button("Open in document", key="rv_open_doc", icon=":material/open_in_new:", width="stretch",
+                      on_click=_open_source, args=(source_page, metric_id),
+                      help="Show the page this figure was approved from, with the figure boxed")
+    found = _approved_candidate(p, result, a.candidate_id)
+    with st.container(key="isec_details"):
+        rows = [("Found value", found.mapped.candidate.raw_value_text if found else
+                 metric_view.full_value_text(state.accepted_value, state.accepted_unit)),
+                ("Format", "Percentage" if state.accepted_unit == "fraction" else "Number")]
+        if where:
+            size = p.extraction.pages[where[0]]
+            rows.append(("Position", _position(where[0] + 1, where[1], size.width, size.height)))
+        high = _confidence_high(p, metric_id, a.candidate_id)
+        st.html('<div class="bpe-h">Extraction details</div><dl class="bpe-dl">'
+                + "".join(f"<dt>{escape(k)}</dt><dd>{escape(v)}</dd>" for k, v in rows)
+                + f'<dt>Confidence</dt><dd><span class="bpe-conf {"hi" if high else "lo"}"><i></i>'
+                  f'{"High" if high else "Low"}</span></dd></dl>')
+        if where:
+            snippet = _snippet(p.doc["sha"], where[0], tuple(where[1]), p.doc["bytes"],
+                               (where[1][0] + where[1][2]) / 2 / p.extraction.pages[where[0]].width)
+            with st.container(key="rv_snippet"):
+                st.html('<div class="bpe-h2">Source snippet</div>')
+                st.image(snippet, width="stretch")
+            if st.button("View full page", key="rv_view_full", icon=":material/fullscreen:", width="stretch"):
+                extract_review._full_screen(p.doc, where[0] + 1, None, ((tuple(where[1]), "marked"),))
+
+
+@st.cache_data(show_spinner=False, max_entries=50)
+def _snippet(sha256: str, page_index: int, box: tuple, _pdf_bytes: bytes, centre_x: float) -> bytes:
+    """A few rows around the figure, boxed in blue and cut to the half of the page it sits in, so the
+    label and value read large."""
+    band = render_band_png(_pdf_bytes, page_index, ((box, ""),), kind="marked", margin=40.0)
+    image = Image.open(io.BytesIO(band))
+    width = image.width * 0.55
+    left = min(max(0.0, centre_x * image.width - width * 0.8), image.width - width)
+    out = io.BytesIO()
+    image.crop((round(left), 0, round(left + width), image.height)).save(out, format="PNG")
+    return out.getvalue()
+
+
+def _source_name() -> str:
+    """The report the figure comes from: "Annual report 2022/23"."""
+    return f"Annual report {extract_review._report_year_label()}"
+
+
+def _open_source(page: int, metric_id: str) -> None:
+    st.session_state.viewer_page = page
+    st.session_state.rv_fit = "page"
+
+
+def _approved_candidate(p: Prepared, result: MetricResult, candidate_id: int | None) -> MetricCandidate | None:
+    """The figure the reviewer approved, from the saved candidate id."""
+    if candidate_id is None:
+        return None
+    key = next((k for (m, k), cid in p.ctx.candidate_ids.items() if m == result.metric.id and cid == candidate_id), None)
+    return next((c for c in result.candidates if c.mapped.key == key), None)
+
+
+def _position(page: int, box: tuple, width: float, height: float) -> str:
+    """Where on the page a figure sits, in words: "Page 7, Right column, Bottom"."""
+    x = (box[0] + box[2]) / 2 / width
+    y = (box[1] + box[3]) / 2 / height
+    column = "Left column" if x < 0.5 else "Right column"
+    row = "Top" if y < 1 / 3 else "Middle" if y < 2 / 3 else "Bottom"
+    return f"Page {page}, {column}, {row}"
+
+
+def _confidence_high(p: Prepared, metric_id: str, candidate_id: int | None) -> bool:
+    """High when the approved figure raised no warnings (wrong year, unit, sign...); Low when it did,
+    even though the reviewer checked them. The app has no other confidence measure."""
+    if candidate_id is None:
+        return False
+    with closing(connect(p.ctx.db_path)) as conn:
+        return not review_service.relevant_warnings(conn, p.ctx.document_id, metric_id, candidate_id)
 
 
 def _steps(p: Prepared, metric_id: str | None, shown_ids: list[str]) -> None:

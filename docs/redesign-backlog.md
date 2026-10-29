@@ -14,8 +14,8 @@ together once the redesign is finished.
 | Work left, per metric | Lists the corrections and calculations awaiting approval and the metrics not reviewed yet, each with an Open button | Expander on each report on Bank Reports | `pages._work_left`, `bulk_review.outstanding_work` (D-077) |
 | Getting started | The workflow steps and the prompt testers copy into the Claude browser extension | Home page (later *Getting started*) | `pages.home`, `docs/tester-prompt.md` |
 | Recent activity | The latest approvals, rejections and reopenings across all reports | Right column of Reports (stage 1) | `project_service.recent_decisions` (the query; the panel was removed) |
-| Approved figures beside the calculations | The report's approved figures (and last year's) listed next to the calculated columns | Left half of Calculations | `calculations._approved_figures` |
-| History of calculated entries | Every value entered or cleared for a calculated column, with who and when | Expander under Calculations | `calculations._history`, `calculation_service.history` |
+| Approved figures beside the calculations | The report's approved figures (and last year's) listed next to the calculated columns | Left half of Calculations | `calculations._approved_figures` (git history) |
+| History of calculated entries | Every value entered or cleared for a calculated column, with who and when | Expander under Calculations | `calculation_service.history` (the page's `_history` is in git history before D-097) |
 | Sector "Not reported" | Records that no sector figure exists for a year, with a reason | Popover on Sector data | `sector_data.record_not_reported` |
 | Note on a sector value | A free note saved with a sector value | Sector data form | `sector_data.record_value(..., note)` |
 | Evidence: checks, other candidates, definition | The value's checks, the other figures found and why they were not used, the metric's definition | Evidence page | `evidence_page._checks_block`, `_candidates_block` |
@@ -30,6 +30,9 @@ together once the redesign is finished.
 | Warnings filter | Lists only the metrics whose figure raised a warning | Review queue filters | `review_page` (status `flagged`); such metrics are under *To review* |
 | Value in the queue | The approved or suggested value beside each metric in the Review queue | Review queue | `review_page._queue_value` before 2026-10-28 (git history) |
 | Box legend | "Red: the suggestion you are checking · thin blue: figures already found on this page" | Under the page on Review | removed; recorded figures are now boxed in plain blue without names, as in the mockup; a suggestion being checked is still red |
+| Type a value for any calculated column | An *Entered value* box on every row, also to change or clear a value already entered (saved with a note that it was typed) | Calculations table before D-097 | `calculation_service.enter_value`; the page now offers *Enter my own value* only where the value differs from the printed figure |
+| Draft formulas note | "The formulas are drafts until Shega confirms them" with a link to the formula list | Above the Calculations table | Templates → Calculated columns still lists each *Formula (draft)* |
+| Reopen extraction from Calculations | Unlocks the figures again, with a reason | Calculations header | Still on Review (`review_page`, `review_service.reopen_extraction`) |
 
 Merging duplicate reports is not parked: the mockup's **Review duplicates** button on Reports
 opens it.

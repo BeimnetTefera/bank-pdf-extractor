@@ -310,7 +310,7 @@ def test_finish_extraction_locks_figures_and_opens_calculations(app):
     page = AppTest.from_function(_calculations_page_script, default_timeout=60)
     page.run()
     assert not page.exception
-    assert "of 26 entered" in html_text(page) and "Extraction finished" in html_text(page)
+    assert "Entered values" in html_text(page) and "Extraction finished" in html_text(page)
 
     save_page = AppTest.from_function(_save_calculated_script, default_timeout=60)
     save_page.session_state["document_id"] = document_id

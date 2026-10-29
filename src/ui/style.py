@@ -132,13 +132,6 @@ header[data-testid="stHeader"] { display: none; }
 .bpe-timeline .dot.g { background: #8A93A3; }
 .bpe-timeline b { font-weight: 500; }
 
-/* Calculations: the dashed draft note, group rows */
-.st-key-draftnote { border: 1px dashed #CDD2DA; border-radius: 8px; background: #FFFFFF; padding: 4px 16px; }
-.st-key-draftnote p { font-size: 13px; color: #4B5363; }
-[class*="st-key-tgroup_"] { background: #FBFBFC; border-bottom: 1px solid #EEF0F3; }
-.st-key-calc_tools { background: #FFFFFF; border-bottom: 1px solid #E3E6EB; padding: 10px 16px; border-radius: 8px 8px 0 0; }
-.st-key-panel_facts { padding: 10px 20px; }
-
 /* New report: steps, the file, what happens next */
 .bpe-steps { display: flex; flex-wrap: wrap; list-style: none; margin: 0 -20px 8px; padding: 0; border-bottom: 1px solid #E3E6EB; }
 .bpe-steps li { flex: 1 1 160px; display: flex; align-items: center; gap: 10px; padding: 14px 20px; font-size: 13px;
@@ -497,6 +490,77 @@ header[data-testid="stHeader"] { display: none; }
 .bpe-savedbox { background: #FFF9EC; border: 1px solid #F1D9A6; border-radius: 8px; padding: 10px 12px; font-size: 13px;
   color: #2E3443; } .bpe-savedbox b { display: block; color: #7A4900; font-weight: 600; }
 .st-key-tpl_detail_edit button { color: #2747C9; }
+/* Calculations, as in the approved mockup (canvas "Calculations page — 4 directions", A made clickable, 2026-10-29) */
+.st-key-page:has(.st-key-panel_table_calc) { gap: 14px; padding-top: 20px; padding-bottom: 20px; }
+.st-key-calc_side { gap: 10px; }
+.st-key-calc_side [data-baseweb="select"] > div { border: 1px solid #D5D9E0; border-radius: 8px; background: #FFFFFF; }
+.bpe-chip.bpe-dashed { background: transparent; border: 1px dashed #A9B1BE; color: #2E3443; }
+.bpe-ctiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.bpe-ctiles > div { height: 74px; box-sizing: border-box; background: #FFFFFF; border: 1px solid #E3E6EB;
+  border-radius: 10px; padding: 10px 16px; }
+.bpe-ctiles > div.warn { border-color: #F1D9A6; } .bpe-ctiles > div.warn b { color: #7A4900; }
+.bpe-ctiles span { display: block; font-size: 13px; color: #4B5363; }
+.bpe-ctiles b { display: block; font: 500 24px "IBM Plex Mono", monospace; color: #15181E; }
+.bpe-ctiles small { font: 500 14px "IBM Plex Sans", sans-serif; color: inherit; }
+.bpe-ctiles > div:last-child small { color: #4B5363; }
+.bpe-ctiles p { display: flex; justify-content: space-between; align-items: baseline; margin: 0; }
+.bpe-ctiles p b { font-size: 20px; }
+.bpe-ctiles i { display: block; height: 6px; border-radius: 3px; background: #EEF0F3; margin-top: 12px; overflow: hidden; }
+.bpe-ctiles em { display: block; height: 100%; background: #17663F; }
+.st-key-panel_table_calc { overflow: hidden; border-radius: 10px; }
+.st-key-calc_tools { height: 56px; box-sizing: border-box; padding: 0 18px; border-bottom: 1px solid #E3E6EB; gap: 8px;
+  flex-wrap: nowrap; }
+.bpe-ctitle { font-weight: 600; margin-right: 8px; white-space: nowrap; }
+[class*="st-key-calc_chip_"] button { min-height: 30px; height: 30px; padding: 0 12px; border-radius: 999px;
+  border: 1px solid #D5D9E0; background: #FFFFFF; }
+[class*="st-key-calc_chip_"] button p { font-size: 13px; white-space: nowrap; }
+.st-key-calc_chip_diff button { border-color: #F1D9A6; background: #FFF9EC; color: #7A4900; }
+[class*="st-key-calc_chip_"][class*="_on"] button { border-color: #2747C9; background: #EEF2FD; color: #2747C9; }
+[class*="st-key-calc_chip_"][class*="_on"] button p { font-weight: 600; }
+.st-key-calc_accept_all button { min-height: 36px; font-weight: 600; white-space: nowrap; }
+[class*="st-key-calc_grp_"]:not([class*="st-key-calc_grp_btn"]) { position: relative; gap: 0;
+  border-bottom: 1px solid #EEF0F3; }
+[class*="st-key-calc_grp_btn_"] button { height: 44px; min-height: 44px; width: 100%; padding: 0 18px; border-radius: 0;
+  justify-content: flex-start; color: #2E3443; }
+[class*="st-key-calc_grp_btn_"] button > div { justify-content: flex-start !important; }
+[class*="st-key-calc_grp_btn_"] button p { text-align: left; }
+[class*="st-key-calc_grp_btn_"] button:hover { background: #F7F9FC; }
+[class*="st-key-calc_grp_btn_"] button p { font-size: 12px; letter-spacing: 0.06em; font-weight: 600; }
+[class*="st-key-calc_grp_btn_"] button p span { letter-spacing: 0; border-radius: 10px; padding: 0 8px; margin-left: 6px; }
+[class*="st-key-calc_grp_"][class*="_open"] [class*="st-key-calc_grp_btn_"] button { background: #F4F6FB; color: #2747C9; }
+[class*="st-key-calc_grp_"] > [data-testid="stElementContainer"]:has(.bpe-grpsum) { position: absolute; right: 18px; top: 0;
+  height: 44px; display: flex; align-items: center; pointer-events: none; width: auto !important; }
+.bpe-grpsum { font-size: 12px; color: #4B5363; white-space: nowrap; }
+.bpe-grpsum b { color: #7A4900; font-weight: 600; }
+.st-key-calc_body { height: 256px !important; flex: none !important; overflow-y: auto; gap: 0; }
+[class*="st-key-trow_calc_"] { height: 64px !important; flex: none !important; box-sizing: border-box; padding: 0 18px; border-bottom: 1px solid #EEF0F3;
+  justify-content: center; }
+[class*="st-key-trow_calc_"]:last-child { border-bottom: 1px solid #EEF0F3; }
+[class*="st-key-trow_calc_"] [data-testid="stHorizontalBlock"] { flex-wrap: nowrap; }
+[class*="st-key-trow_calc_"][class*="_diff"] { height: 128px !important; background: #FFFBF2; justify-content: flex-start;
+  padding-top: 7px; gap: 6px; }
+.bpe-cname { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bpe-cwords { font-size: 12px; color: #4B5363; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bpe-clabel { font-size: 12px; color: #4B5363; }
+.bpe-cval { font: 500 14px "IBM Plex Mono", monospace; color: #15181E; white-space: nowrap; }
+.bpe-cnone { font-size: 13px; color: #5F6775; }
+.bpe-cneed { font-size: 13px; color: #2E3443; } .bpe-cneed b { font-weight: 600; }
+.bpe-centered { font-size: 13px; color: #17663F; font-weight: 600; }
+[class*="st-key-trow_calc_"] button { min-height: 36px; font-weight: 500; }
+[class*="st-key-calc_box_"] { height: 60px !important; flex: none !important; box-sizing: border-box; background: #FFFFFF; border: 1px solid #F1D9A6;
+  border-radius: 8px; padding: 0 12px; gap: 8px; flex-wrap: nowrap; }
+[class*="st-key-calc_box_"] > [data-testid="stElementContainer"]:has(.bpe-cboxtext) { flex: 1 1 auto; min-width: 0; }
+.bpe-cboxtext b { display: block; font-weight: 600; color: #7A4900; font-size: 13px; }
+.bpe-cboxtext code { display: block; font: 12px "IBM Plex Mono", monospace; color: #2E3443; background: none; padding: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+[class*="st-key-calc_box_"] button { min-height: 36px; white-space: nowrap; }
+[class*="st-key-calc_box_"] [data-baseweb="input"] { border: 2px solid #2747C9; border-radius: 8px; }
+[class*="st-key-calc_box_"] input { font: 14px "IBM Plex Mono", monospace; }
+.st-key-calc_gpager { height: 44px; box-sizing: border-box; padding: 0 18px; background: #F9FAFB; border-top: 1px solid #E3E6EB;
+  border-bottom: 1px solid #E3E6EB; }
+.st-key-calc_gpages { gap: 6px; }
+.st-key-calc_gpages button { width: 30px; min-height: 30px; height: 30px; padding: 0; border: 1px solid #D5D9E0;
+  background: #FFFFFF; }
 </style>
 """
 

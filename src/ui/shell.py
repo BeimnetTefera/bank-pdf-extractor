@@ -44,10 +44,11 @@ def menu_counts(config: AppConfig) -> tuple[int, int]:
     return len(documents), waiting
 
 
-def menu(groups: Sequence[tuple[str, Sequence[tuple[object, str | None]]]], rail: bool, current: object = None,
-         titles: bool = False) -> None:
-    """The left menu: (group label, [(page, count text)]); the current page is marked. With titles each
-    group is named, else the groups are split by a thin line. As a rail: icons only, no counts."""
+def menu(groups: Sequence[tuple[str, Sequence[tuple[object, str | tuple[str, str] | None]]]], rail: bool,
+         current: object = None, titles: bool = False) -> None:
+    """The left menu: (group label, [(page, count text)]); the current page is marked. A count given as
+    (text, "warn") is an amber badge (Templates' unsaved meanings). With titles each group is named, else
+    the groups are split by a thin line. As a rail: icons only, no counts."""
     with st.container(key="nav_rail" if rail else "nav"):
         for at, (label, pages) in enumerate(groups):
             if titles and not rail:
@@ -60,10 +61,11 @@ def menu(groups: Sequence[tuple[str, Sequence[tuple[object, str | None]]]], rail
                     if rail:
                         st.page_link(page, label=" ", help=page.title, width="stretch")
                         continue
-                    link_col, count_col = st.columns([5, 1], vertical_alignment="center", gap=None)
+                    text, tone = count if isinstance(count, tuple) else (count, "")
+                    link_col, count_col = st.columns([3, 2] if tone else [5, 1], vertical_alignment="center", gap=None)
                     link_col.page_link(page, width="stretch")
-                    if count:
-                        count_col.html(f'<span class="bpe-count">{escape(count)}</span>')
+                    if text:
+                        count_col.html(f'<span class="bpe-count{" " + tone if tone else ""}">{escape(text)}</span>')
 
 
 def search_results(config: AppConfig, query: str, open_hit: Callable[[search.Hit], None]) -> None:

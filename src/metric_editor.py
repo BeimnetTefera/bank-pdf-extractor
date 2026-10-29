@@ -19,6 +19,7 @@ from src.config_loader import ConfigError, load_metrics
 
 _ID = re.compile(r"^\s*- id:\s*['\"]?([\w.-]+)['\"]?\s*(#.*)?$")
 _DEFINITION = re.compile(r"^(\s+)definition:\s")
+MIN_LENGTH = 10  # a meaning shorter than this is refused
 
 
 class MetricEditError(ValueError):
@@ -30,7 +31,7 @@ def set_definition(path: Path, metric_id: str, text: str, reviewer: str) -> None
     text = " ".join(text.split())
     if not reviewer.strip():
         raise MetricEditError("Enter your name on Settings first: every change is signed.")
-    if len(text) < 10:
+    if len(text) < MIN_LENGTH:
         raise MetricEditError("Write the meaning in at least a short sentence.")
     lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
     current, target = None, None

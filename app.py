@@ -8,7 +8,7 @@ import streamlit as st
 from src.config_loader import ConfigError, load_config
 from src.seed_data import restore_seed
 from src.ui import (calculations, evidence_page, extract_review, new_report, pages, review_page, routes,
-                    sector_page, shell, style)
+                    sector_page, shell, style, templates_page as templates_ui)
 from src.ui import extract_page as extract_page_ui
 
 # "expanded" rather than the default "auto": with "auto" the browser re-decides on window
@@ -63,7 +63,7 @@ def sector_data_page() -> None:
 
 
 def templates_page() -> None:
-    pages.templates(config)
+    templates_ui.render(config)
 
 
 def settings_page() -> None:
@@ -159,7 +159,8 @@ on_review = navigation.url_path == app_pages[7].url_path
 MENU = (("Workspace", ((app_pages[3], str(reports_count) if on_review else None), (app_pages[1], None),
                        (app_pages[7], str(waiting_count)),
                        (app_pages[2], None), (app_pages[4], None))),
-        ("Setup", ((app_pages[5], None), (app_pages[6], None))))
+        ("Setup", ((app_pages[5], (f"{templates_ui.unsaved_count()} unsaved", "warn") if templates_ui.unsaved_count() else None),
+                   (app_pages[6], None))))
 
 query = shell.top_bar(config)
 nav_col, page_col = st.columns([1, 6], gap=None)

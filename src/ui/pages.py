@@ -1,4 +1,4 @@
-"""Smaller screens: Getting started, Reports (the home), Templates (metric configuration) and Settings."""
+"""Smaller screens: Getting started, Reports (the home) and Settings, plus the wording editor parked off Templates."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from html import escape
 
-import pandas as pd
 import streamlit as st
 
 from src import bulk_review, ocr, report_corrections, report_merge, review_service
@@ -21,7 +20,6 @@ from src.database import connect
 from src.evidence import format_value
 from src.excel_exporter import fiscal_year_label, report_years
 from src.mapping_editor import KINDS, MappingEditError, add_wording, list_wording, remove_wording
-from src.metric_editor import MetricEditError, set_definition
 from src.project_service import list_documents
 from src.ui import routes, shell, style
 from src.ui.export_panel import export_button
@@ -61,7 +59,7 @@ def home() -> None:
 
 
 REPORT_COLUMNS = [3.0, 1.0, 0.7, 1.7, 1.8, 1.2, 0.9]  # bank, fiscal year, pages, progress, work left, status, open
-REPORTS_PAGE, METRICS_PAGE = 10, 15  # rows per page of the Reports and Templates tables
+REPORTS_PAGE = 10  # rows per page of the Reports table
 
 
 def bank_reports(config: AppConfig, open_report: Callable[[str], str | None],
@@ -352,103 +350,6 @@ def _deletion_log(config: AppConfig) -> None:
               "Approved values": r["approved_values"], "Reason": r["reason"], "Deleted by": r["reviewer"],
               "When (UTC)": r["deleted_at"][:16].replace("T", " ")} for r in rows],
             hide_index=True, width="stretch")
-
-
-def templates(config: AppConfig) -> None:
-    """Templates (D-092, D-093): what the app looks for in a report and what each column means.
-    The meaning of a metric can be edited here; it is saved to config/metrics.yaml with your name."""
-    st.markdown("## Templates")
-    st.html('<p class="bpe-sub">What the app looks for in a report, what each column means, and where it goes in the '
-            'Excel export.</p>')
-    template = config.export_template
-    metrics_tab, calc_tab = st.tabs([f"Metrics {len(config.metrics)}", f"Calculated columns {len(template.calculated)}"])
-    with metrics_tab, st.container(key="panel_table_metrics"):
-        with st.container(key="thead_metrics_tools"):
-            find_col, hint_col = st.columns([2, 3], vertical_alignment="center")
-            found = find_col.text_input("Find a metric", key="templates_find", placeholder="Find a metric",
-                                        label_visibility="collapsed", icon=":material/search:")
-            hint_col.html('<p class="bpe-minor" style="text-align:right;margin:0">Edit a meaning in the table, then '
-                          'press Save. Changes are saved to the configuration with your name.</p>')
-        shown = [m for m in config.metrics if not found or found.casefold() in m.display_name.casefold()]
-        start, end = shell.pager("templates_page", len(shown), METRICS_PAGE)
-        _meanings_editor(config, shown[start:end], key=f"meanings_{start}_{found}_{st.session_state.get('_meanings_saved', 0)}")
-    with calc_tab:
-        st.html(_calculated_table(config))
-
-
-def _meanings_editor(config: AppConfig, metrics, key: str) -> None:
-    """The metrics as a table whose Meaning column can be edited; Save writes the changed ones."""
-    original = pd.DataFrame([{
-        "Metric": m.display_name, "Unit": m.expected_unit, "Excel column": m.export_column or "none",
-        "Meaning": m.definition, "Standard formula": readable_formula(m.formula) if m.formula else (
-            "printed" if m.active else "not used"),
-        "Status": "Active" if m.active else "Inactive"} for m in metrics])
-    edited = st.data_editor(
-        original, hide_index=True, width="stretch", num_rows="fixed", key=key,
-        disabled=["Metric", "Unit", "Excel column", "Standard formula", "Status"],
-        column_config={"Metric": st.column_config.TextColumn(width=170),
-                       "Unit": st.column_config.TextColumn(width=70),
-                       "Excel column": st.column_config.TextColumn(width=170),
-                       "Meaning": st.column_config.TextColumn(width="large", help="What the figure is: edit and Save."),
-                       "Standard formula": st.column_config.TextColumn(width=180),
-                       "Status": st.column_config.TextColumn(width=80)})
-    changed = [(m, edited.iloc[i]["Meaning"]) for i, m in enumerate(metrics)
-               if str(edited.iloc[i]["Meaning"] or "").strip() != m.definition]
-    with st.container(key="meanings_save"):
-        if st.button(f"Save {len(changed)} meaning(s)" if changed else "Save meanings", key="meanings_save_button",
-                     type="primary", disabled=not changed):
-            path = (config.config_dir or CONFIG_DIR) / "metrics.yaml"
-            errors = []
-            for metric, text in changed:
-                try:
-                    set_definition(path, metric.id, str(text), st.session_state.get("reviewer", ""))
-                except MetricEditError as exc:
-                    errors.append(f"**{metric.display_name}**: {exc}")
-            if errors:
-                st.error("  \n".join(errors), icon=":material/error:")
-            else:
-                st.session_state._meanings_saved = st.session_state.get("_meanings_saved", 0) + 1
-                st.toast(f"Saved {len(changed)} meaning(s)", icon=":material/check_circle:")
-                st.rerun()
-
-
-def _metrics_table(metrics) -> str:
-    """Metric, unit, Excel column, standard formula and status, as one HTML table."""
-    rows = []
-    for m in metrics:
-        if m.formula:
-            formula = f'<code class="bpe-code">{escape(readable_formula(m.formula))}</code>'
-        else:
-            formula = f'<span class="bpe-minor">{"printed" if m.active else "not used"}</span>'
-        column = escape(m.export_column) if m.export_column else '<span class="bpe-minor">none</span>'
-        status = style.chip("Active", "ok") if m.active else style.chip("Inactive", "muted")
-        rows.append(f"<tr><td>{escape(m.display_name)}</td><td>{escape(m.expected_unit)}</td><td>{column}</td>"
-                    f"<td>{formula}</td><td>{status}</td></tr>")
-    return ('<div class="bpe-tablebox"><table class="bpe-table"><thead><tr><th>Metric</th><th>Unit</th>'
-            '<th>Excel column</th><th>Standard formula</th><th>Status</th></tr></thead><tbody>'
-            + "".join(rows) + "</tbody></table></div>")
-
-
-def _calculated_table(config: AppConfig) -> str:
-    """The calculated columns with their draft formula (D-088)."""
-    rows = []
-    for column in config.export_template.calculated:
-        f = config.export_template.formula(column)
-        formula = f'<code class="bpe-code">{escape(readable_formula(f.formula))}</code>' if f else "none"
-        unit = escape(f.unit) if f else ""
-        compare = escape(f.compare_with) if f and f.compare_with else ""
-        rows.append(f"<tr><td>{escape(column)}</td><td>{formula}</td><td>{unit}</td><td>{compare}</td></tr>")
-    return ('<div class="bpe-tablebox"><table class="bpe-table bpe-panel-table"><thead><tr><th>Calculated column</th>'
-            '<th>Formula (draft)</th><th>Unit</th><th>Compared with</th></tr></thead><tbody>'
-            + "".join(rows) + "</tbody></table></div>")
-
-
-def readable_formula(formula: str) -> str:
-    """'profit_after_tax_etb / avg(total_equity_etb, total_equity_etb_prev)' ->
-    'profit_after_tax ÷ avg(total_equity, last year)'."""
-    text = re.sub(r"\b[a-z0-9_]+_prev\b", "last year", formula)
-    text = re.sub(r"_etb\b", "", text)
-    return text.replace(" / ", " ÷ ").replace(" * ", " × ").replace(" - ", " − ")
 
 
 def wording_editor(config: AppConfig) -> None:

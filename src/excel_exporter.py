@@ -45,6 +45,7 @@ from src.config_loader import AppConfig
 from src.evidence import EvidenceError, MetricEvidence, PdfWords, SectorEvidence, evidence_url, format_value
 from src.evidence import load_report_pdf, report_evidence, sector_evidence, sector_evidence_url
 from src.external_sources import SavedSource, mismatch_text
+from src.report_period import fiscal_year
 from src.pdf_extractor import NARRATIVE_METHOD
 from src.review_service import ApprovedResult, approved_results, extraction_status
 from src.sector_data import sector_metrics
@@ -572,8 +573,7 @@ def _report_warnings(r: _Report) -> list[str]:
 
 
 def _fiscal_year(document: sqlite3.Row) -> str:
-    end_year = report_end_year(document["reporting_period"])
-    return fiscal_year_label(end_year) if end_year else document["reporting_period"]
+    return fiscal_year(document["reporting_period"])
 
 
 def _cell_value(value: Decimal) -> int | float | str:

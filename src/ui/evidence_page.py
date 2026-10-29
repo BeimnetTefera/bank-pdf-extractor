@@ -290,24 +290,24 @@ def _source_block(config: AppConfig, ev: MetricEvidence, pdf: bytes | None) -> N
         st.caption(f"The value was saved with page {ev.typed_page}; the number is printed on page {ev.page}, "
                    "the page named in the note.")
     if pdf is not None:
-        page_col, crop_col = st.columns([3, 2])
+        # The close-up spans the page's full width, so it gets the panel's full width to stay readable.
         kind = "input" if ev.box_is_input else "focus"
         label = "marked figure (not the value)" if ev.box_is_input else ev.display_name
-        with page_col:
-            boxes = ((tuple(ev.box), kind, label),) if ev.box is not None else ()
-            st.image(_page_png(ev.document["sha256"], ev.page - 1, boxes, pdf), width="stretch")
-        with crop_col:
-            if ev.box_is_input:
-                st.warning(f"The marked box holds a different number from {ev.value_text}: the value was worked "
-                           "out, but the note does not show how. Record it with Calculate so each figure used is "
-                           "marked.", icon=":material/warning:")
-            if ev.box is not None:
-                st.caption("Close-up of the line")
-                st.image(_crop_png(ev.document["sha256"], ev.page - 1, tuple(ev.box), pdf, kind=kind), width="stretch")
-            else:
-                st.warning(f"{ev.value_text} is not printed on page {ev.page} (as printed or in thousands, millions "
-                           "or billions), so there is no box. If it was worked out from other figures, record it "
-                           "with Calculate so each figure used is marked.", icon=":material/search_off:")
+        if ev.box_is_input:
+            st.warning(f"The marked box holds a different number from {ev.value_text}: the value was worked "
+                       "out, but the note does not show how. Record it with Calculate so each figure used is "
+                       "marked.", icon=":material/warning:")
+        if ev.box is not None:
+            st.caption("Close-up of the line")
+            st.image(_crop_png(ev.document["sha256"], ev.page - 1, tuple(ev.box), pdf, kind=kind), width="stretch")
+        else:
+            st.warning(f"{ev.value_text} is not printed on page {ev.page} (as printed or in thousands, millions "
+                       "or billions), so there is no box. If it was worked out from other figures, record it "
+                       "with Calculate so each figure used is marked.", icon=":material/search_off:")
+        page_col, _ = st.columns([3, 2])
+        boxes = ((tuple(ev.box), kind, label),) if ev.box is not None else ()
+        page_col.image(_page_png(ev.document["sha256"], ev.page - 1, boxes, pdf), width="stretch",
+                       caption=f"PDF page {ev.page}")
     if st.button("Open in viewer at this page", icon=":material/open_in_new:", key="evidence_open_viewer"):
         _open_in_viewer(config, ev, pdf)
 
@@ -327,14 +327,13 @@ def _external_source_block(config: AppConfig, source: SavedSource, label: str) -
     except ReviewError as exc:
         st.warning(f"The uploaded copy cannot be shown. {exc}", icon=":material/warning:")
         return
-    page_col, crop_col = st.columns([3, 2])
+    if crop is not None:
+        st.caption("Close-up of the line")
+        st.image(crop, width="stretch")
+    else:
+        st.caption("No box was marked on the uploaded page.")
+    page_col, _ = st.columns([3, 2])
     page_col.image(page, width="stretch", caption=f"Page {source.page} of {source.file_name or 'the uploaded copy'}")
-    with crop_col:
-        if crop is not None:
-            st.caption("Close-up of the line")
-            st.image(crop, width="stretch")
-        else:
-            st.caption("No box was marked on the uploaded page.")
 
 
 @st.cache_data(show_spinner=False, max_entries=50)

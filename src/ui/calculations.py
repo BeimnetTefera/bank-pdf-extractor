@@ -9,7 +9,6 @@ rows, so the page keeps to the size of the window instead of growing downward.
 
 from __future__ import annotations
 
-import sqlite3
 from collections.abc import Callable
 from contextlib import closing
 from decimal import Decimal
@@ -19,11 +18,10 @@ import pandas as pd
 import streamlit as st
 
 from src import calculation_service, review_service
-from src.analysis import report_end_year
 from src.config_loader import AppConfig
 from src.database import connect
-from src.excel_exporter import fiscal_year_label
 from src.project_service import list_documents
+from src.report_period import fiscal_year
 from src.review_service import ReviewError
 from src.ui import routes
 
@@ -100,7 +98,7 @@ def render(config: AppConfig, open_report: Callable[[str], str | None]) -> None:
         document_id = st.selectbox(
             "Report", list(documents), key="calc_document", label_visibility="collapsed", width=240,
             on_change=_reset_view,
-            format_func=lambda i: f"{documents[i]['bank_name']} · {_year(documents[i])}")
+            format_func=lambda i: f"{documents[i]['bank_name']} · {fiscal_year(documents[i]['reporting_period'])}")
     state = status[document_id]
     if state.finished:
         state_slot.html(f'<span class="bpe-chip bpe-ok">Extraction finished · {escape(state.reviewer)}</span>',
@@ -381,11 +379,6 @@ def _save(config: AppConfig, document_id: str, original: pd.DataFrame, edited: p
         st.toast(f"Saved {saved} calculated value(s)", icon=":material/check_circle:")
         if not errors:
             st.rerun()
-
-
-def _year(doc: sqlite3.Row) -> str:
-    end_year = report_end_year(doc["reporting_period"])
-    return fiscal_year_label(end_year) if end_year else doc["reporting_period"]
 
 
 def _plain(value: Decimal | None) -> str:

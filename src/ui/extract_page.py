@@ -9,6 +9,7 @@ picked metric. Deciding (approve, mark, not reported) happens on Review.
 from __future__ import annotations
 
 import io
+import re
 from collections.abc import Callable
 from contextlib import closing
 from dataclasses import dataclass
@@ -27,6 +28,7 @@ from src.project_service import get_document, new_figures
 from src.review_service import ReviewState
 from src.ui import extract_review, review_page, style
 from src.ui.extract_review import Prepared
+from src.ui.review_panel import value_and_unit
 
 ROWS_PER_PAGE = 6  # the drawer has a fixed height: it never scrolls, it pages
 FILTERS = ("all", "needs", "found", "not_found")
@@ -97,6 +99,7 @@ def render(config: AppConfig, open_review: Callable[[], None], open_reports: Cal
         st.markdown("## Extract")
         st.html('<p class="bpe-sub">Open a saved report to see what the app read from it, page by page.</p>')
         st.button("Open Reports", icon=":material/description:", type="primary", on_click=open_reports)
+        review_page.report_picker(config)
         return
     if not review_page._saved_fields(config, doc["document_id"]):
         st.error("That report is no longer in the database.", icon=":material/error:")
@@ -410,10 +413,41 @@ def _row(p: Prepared, metric_id: str, status: Status, selected: bool) -> None:
                                                                gap="small")
         name_col.button(result.metric.display_name, key=f"ex_{metric_id}", type="tertiary", width="stretch",
                         on_click=_pick, args=(p, metric_id))
-        value_col.html(f'<div class="bpe-qval">{escape(primary.mapped.candidate.raw_value_text) if primary else "–"}'
-                       '</div>')
-        page_col.html(f'<div class="bpe-qval">{primary.mapped.candidate.page_index + 1 if primary else "–"}</div>')
+        value, page = _shown(p, metric_id)
+        value_col.html(f'<div class="bpe-qval">{escape(value)}</div>')
+        page_col.html(f'<div class="bpe-qval">{escape(page)}</div>')
         status_col.html(_chip(status))
+
+
+def _shown(p: Prepared, metric_id: str) -> tuple[str, str]:
+    """The value and page a row shows: the approved figure once there is one, else the app's suggestion.
+    A value typed or picked by a reviewer is shown in full, as approved."""
+    result = p.analysis.metric(metric_id)
+    state = p.states.get(metric_id)
+    decision = state.accepted_decision if state is not None and state.status == "approved" else None
+    if decision is not None:
+        keys = {candidate_id: key for (mid, key), candidate_id in p.ctx.candidate_ids.items() if mid == metric_id}
+        figure = next((c for c in result.candidates if c.mapped.key == keys.get(decision.candidate_id)), None)
+        if figure is not None and not state.is_human_entered:  # approved as printed
+            return figure.mapped.candidate.raw_value_text, str(figure.mapped.candidate.page_index + 1)
+        # corrected or typed: the value as approved, on the page saved with it; else the corrected figure's page,
+        # but only when it is the same printed number (a unit fix), never the page of a figure it replaced
+        proposal = next((h for h in state.history if h.id == decision.approves_decision_id), None)
+        page = decision.source_page or (proposal.source_page if proposal is not None else None)
+        if not page and figure is not None and _same_digits(figure.mapped.candidate.raw_value_text, state.accepted_value):
+            page = figure.mapped.candidate.page_index + 1
+        number, _ = value_and_unit(state.accepted_value, state.accepted_unit)
+        return number, str(page) if page else "–"
+    primary = result.primary
+    if primary is None:
+        return "–", "–"
+    return primary.mapped.candidate.raw_value_text, str(primary.mapped.candidate.page_index + 1)
+
+
+def _same_digits(printed: str, value) -> bool:
+    """'189,512,266' and 189512266000: the printed number, scaled by a power of ten (thousands to Birr)."""
+    digits, whole = re.sub(r"\D", "", printed), str(abs(int(value))) if value is not None else ""
+    return bool(digits) and whole.startswith(digits) and set(whole[len(digits):]) <= {"0"}
 
 
 def _checks(p: Prepared) -> None:

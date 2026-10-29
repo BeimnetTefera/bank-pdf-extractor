@@ -14,13 +14,13 @@ from html import escape
 import streamlit as st
 
 from src import bulk_review, ocr, report_corrections, report_merge, review_service
-from src.analysis import report_end_year
 from src.config_loader import CONFIG_DIR, AppConfig, bank_key
 from src.database import connect
 from src.evidence import format_value
 from src.excel_exporter import fiscal_year_label, report_years
 from src.mapping_editor import KINDS, MappingEditError, add_wording, list_wording, remove_wording
 from src.project_service import list_documents
+from src.report_period import fiscal_year
 from src.ui import routes, shell, style
 from src.ui.export_panel import export_button
 
@@ -90,7 +90,7 @@ def bank_reports(config: AppConfig, open_report: Callable[[str], str | None],
         ("Waiting for review", str(sum(work[d["id"]].count for d in documents)),
          f"across {_plural(len(waiting), 'report')}"),
         ("Ready for calculations", str(len(ready)),
-         ", ".join(f"{d['bank_name']} {_year(d)}" for d in ready) or "none yet"),
+         ", ".join(f"{d['bank_name']} {fiscal_year(d["reporting_period"])}" for d in ready) or "none yet"),
     ])
     _duplicates(config)
     with st.container(key="panel_table_reports"):
@@ -127,12 +127,13 @@ def _report_row(config: AppConfig, d, approved: int, total: int, not_reported: i
     with st.container(key=f"trow_{d['id']}"):
         bank, year, pages_col, progress, left, status, action = st.columns(REPORT_COLUMNS, vertical_alignment="center")
         bank.html(f'<b style="font-weight:500">{escape(d["bank_name"])}</b>'
-                  f'<div class="bpe-file">{escape(d["original_filename"])}</div>')
-        year.html(f'<span class="bpe-num">{escape(_year(d))}</span>')
+                  f'<div class="bpe-file bpe-oneline" title="{escape(d["original_filename"])}">'
+                  f'{escape(d["original_filename"])}</div>')
+        year.html(f'<span class="bpe-num">{escape(fiscal_year(d["reporting_period"]))}</span>')
         pages_col.html(f'<span class="bpe-num">{d["page_count"]}</span>')
-        count = f"{approved} of {total}" + (f" · {not_reported} not reported" if not_reported else "")
+        extra = f'<span class="bpe-minor"> · {not_reported} not reported</span>' if not_reported else ""
         progress.html(style.bar((approved + not_reported) / total if total else 0.0)
-                      + f'<div class="bpe-minor bpe-num">{escape(count)}</div>')
+                      + f'<div class="bpe-minor bpe-oneline"><span class="bpe-num">{approved} of {total}</span>{extra}</div>')
         left.html(f'<span class="bpe-minor">{escape(_work_text(config, work))}</span>')
         kind, label = ("ok", "Finished") if finished else ("muted", "Duplicate") if duplicate else ("warn", "In review")
         status.html(style.chip(label, kind))
@@ -152,11 +153,6 @@ def _work_text(config: AppConfig, work: bulk_review.OutstandingWork) -> str:
     names = {m.id: m.display_name for m in config.metrics}
     metric_ids = [*work.corrections, *work.calculations, *work.not_reviewed]
     return ", ".join(names.get(m, m) for m in metric_ids) if work.count <= 2 else f"{work.count} metrics"
-
-
-def _year(d) -> str:
-    end_year = report_end_year(d["reporting_period"])
-    return fiscal_year_label(end_year) if end_year else d["reporting_period"]
 
 
 def _reviewer() -> str:
@@ -227,7 +223,7 @@ def _duplicates(config: AppConfig) -> None:
                 text_col, button_col = st.columns([6, 1.3], vertical_alignment="center")
                 times = {2: "twice"}.get(len(group.documents), f"{len(group.documents)} times")
                 text_col.markdown(f":orange[:material/warning:] **The same PDF is saved {times}:** "
-                                  f"{first['bank_name']} {_year(first)}. Merging keeps the copy with more decisions.")
+                                  f"{first['bank_name']} {fiscal_year(first["reporting_period"])}. Merging keeps the copy with more decisions.")
                 key = f"show_merge_{group.sha256}"
                 if button_col.button("Review duplicates", key=f"review_dups_{group.sha256[:12]}", width="stretch"):
                     st.session_state[key] = not st.session_state.get(key, False)

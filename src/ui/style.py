@@ -105,6 +105,7 @@ header[data-testid="stHeader"] { display: none; }
 .bpe-minor { color: #5F6775; font-size: 12px; }
 .bpe-num { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; font-size: 13px; }
 .bpe-file { font-size: 12px; color: #5F6775; overflow-wrap: anywhere; }
+.bpe-oneline { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* tables built from rows of columns: a grey header row, thin lines between rows */
 [class*="st-key-panel_table"] { padding: 0; gap: 0; }

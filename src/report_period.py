@@ -35,6 +35,11 @@ def canonical_period(text: str | None) -> str | None:
     return fiscal_year_label(end_year)
 
 
+def fiscal_year(period: str) -> str:
+    """A saved report period as shown everywhere, YYYY/YY; the period as saved when no year can be read."""
+    return canonical_period(period) or period
+
+
 def period_from_text(pages: Iterable[str]) -> str | None:
     """The fiscal year of the latest 30 June period end stated in the text, or None.
 

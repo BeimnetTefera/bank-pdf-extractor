@@ -153,19 +153,17 @@ if st.session_state.pop("goto_review", False):
 
 st.session_state.reviewer = st.session_state.get("reviewer", config.settings.default_reviewer)
 reports_count, waiting_count = shell.menu_counts(config)
-# The menu in two groups: the daily work, then the setup. The approved mockups differ (2026-10-28): Review's
-# names the groups and counts the reports; Extract's (and every other page's) splits them by a line.
-on_review = navigation.url_path == app_pages[7].url_path
-MENU = (("Workspace", ((app_pages[3], str(reports_count) if on_review else None), (app_pages[1], None),
-                       (app_pages[7], str(waiting_count)),
+# The menu in two named groups, the daily work then the setup, with counts: the Review mockup's menu on every
+# page (the approved mockups differed; one style throughout since 2026-10-29).
+unsaved = templates_ui.unsaved_count()
+MENU = (("Workspace", ((app_pages[3], str(reports_count)), (app_pages[1], None), (app_pages[7], str(waiting_count)),
                        (app_pages[2], None), (app_pages[4], None))),
-        ("Setup", ((app_pages[5], (f"{templates_ui.unsaved_count()} unsaved", "warn") if templates_ui.unsaved_count() else None),
-                   (app_pages[6], None))))
+        ("Setup", ((app_pages[5], (f"{unsaved} unsaved", "warn") if unsaved else None), (app_pages[6], None))))
 
 query = shell.top_bar(config)
 nav_col, page_col = st.columns([1, 6], gap=None)
 with nav_col:
-    shell.menu(MENU, rail=False, current=navigation, titles=on_review)  # the full menu on every page, Review too (user feedback 2026-10-28)
+    shell.menu(MENU, rail=False, current=navigation, titles=True)
 with page_col, st.container(key="page"):
     shell.search_results(config, query, _open_hit)
     navigation.run()

@@ -27,7 +27,8 @@ from src.config_loader import AppConfig
 from src.database import connect
 from src.pdf_render import render_band_png
 from src.models import MetricCandidate, MetricResult
-from src.project_service import get_document
+from src.project_service import get_document, list_documents
+from src.report_period import fiscal_year
 from src.review_service import ReviewError, ReviewState
 from src.ui import calc_panel, extract_review, metric_view, review_panel, style
 from src.ui.extract_review import Prepared
@@ -68,6 +69,30 @@ QUEUE_STATUS = {"needs_review": ("To review", "blue"), "flagged": ("To review", 
 ZOOMS = list(extract_review.ZOOM_LEVELS)
 
 
+def report_picker(config: AppConfig) -> None:
+    """The saved reports, those still in review first, each with Open: an empty Review or Extract opens one
+    in a click instead of a trip through Reports."""
+    with closing(connect(config.settings.database_path)) as conn:
+        documents = list_documents(conn)
+        finished = {d["id"]: review_service.extraction_status(conn, d["id"]).finished for d in documents}
+    if not documents:
+        return
+    with st.container(key="panel_table_pick"):
+        st.html('<div class="bpe-qgroup" style="padding:10px 16px">Saved reports</div>')
+        for d in sorted(documents, key=lambda d: finished[d["id"]]):
+            with st.container(key=f"trow_pick_{d['id']}"):
+                name_col, state_col, open_col = st.columns([4, 1.2, 0.8], vertical_alignment="center")
+                name_col.html(f'<b style="font-weight:500">{escape(d["bank_name"])} · '
+                              f'{escape(fiscal_year(d["reporting_period"]))}</b><div class="bpe-file bpe-oneline" '
+                              f'title="{escape(d["original_filename"])}">{escape(d["original_filename"])}</div>')
+                state_col.html(style.chip("Finished", "ok") if finished[d["id"]] else style.chip("In review", "warn"))
+                if open_col.button("Open", key=f"pick_{d['id']}", width="stretch"):
+                    if error := extract_review.open_saved(config, d["id"]):
+                        st.error(error, icon=":material/error:")
+                    else:
+                        st.rerun()
+
+
 def render(config: AppConfig, open_calculations: Callable[[str], None] | None = None,
            open_reports: Callable[[], None] | None = None) -> None:
     doc = st.session_state.get("doc")
@@ -76,6 +101,7 @@ def render(config: AppConfig, open_calculations: Callable[[str], None] | None = 
         st.html('<p class="bpe-sub">Open a saved report to review its figures one by one.</p>')
         if open_reports is not None:
             st.button("Open Reports", icon=":material/description:", type="primary", on_click=open_reports)
+        report_picker(config)
         return
     if not _saved_fields(config, doc["document_id"]):
         st.error("That report is no longer in the database.", icon=":material/error:")
